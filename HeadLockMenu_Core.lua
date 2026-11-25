@@ -1015,8 +1015,7 @@ for _,definition in ipairs({
  {"Oof","Died","oof"},
  {"Blackout","Blackout","world"},
  {"Door Roar","LockDoorRoar","jug"}
-})do table.insert(SC.sounds.rows,{definition=definition,enabled=false,pending=false,busy=false,links={}})end
-if type(_G.HeadLockSoundMenuCleanup)=="function"then pcall(_G.HeadLockSoundMenuCleanup)end
+})do table.insert(SC.sounds.rows,{definition=definition,enabled=false,interval=1,nextPlay=nil,clones={},pausedClones={}})end
 function SC.findMenuSound(row)
  local d=row.definition
  if d[3]=="world"then
@@ -1045,64 +1044,79 @@ function SC.findMenuSound(row)
   if sound and(d[3]=="oof"or character.Name~="Zombie")then return sound end
  end
 end
-function SC.linkMenuSound(row,sound)
- if row.current==sound then return end
- for _,connection in ipairs(row.links)do connection:Disconnect()end table.clear(row.links)
- row.current=sound row.busy=false
- if sound then
-  local function finished()if row.current==sound then row.busy=false end end
-  table.insert(row.links,sound.Ended:Connect(finished))
-  table.insert(row.links,sound.Stopped:Connect(finished))
- end
-end
-function SC.playMenuSound(row,queue)
+function SC.playMenuSound(row)
  if SC.paused or SC.soundsPaused or SC.sounds.closed then return false end
  local sound=SC.findMenuSound(row)
- SC.linkMenuSound(row,sound)
  if not sound or sound.Looped then return false end
- if sound.IsPlaying or row.busy then if queue then row.pending=true end return false end
- row.busy=true row.requestTime=os.clock()
- local ok=pcall(function()sound:Play()end)
- if ok then row.pending=false else row.busy=false row.nextTry=os.clock()+1 end
+ row.current=sound
+ local ok=pcall(function()
+  sound.TimePosition=0
+  sound:Play()
+  row.played=true
+  local clone=sound:Clone()
+  clone.Looped=false
+  clone.Parent=sound.Parent
+  clone.TimePosition=0
+  clone:Play()
+  table.insert(row.clones,clone)
+  while #row.clones>32 do
+   local oldest=table.remove(row.clones,1)
+   if oldest.Parent then oldest:Destroy()end
+  end
+  game:GetService("Debris"):AddItem(clone,math.max(2,clone.TimeLength+1))
+ end)
  return ok
+end
+function SC.setMenuSoundInterval(row,value)
+ local seconds=tonumber(value)or tonumber(tostring(value):match("[%d%.]+"))
+ if not seconds then return false end
+ row.interval=math.clamp(seconds,.05,60)
+ if row.enabled then row.nextPlay=os.clock()+row.interval end
+ if SC.sounds.update then SC.sounds.update()end
+ return true
 end
 function SC.setMenuSoundAuto(row,value)
  if SC.sounds.closed then return end
  row.enabled=value==true and not SC.paused
- if row.enabled then SC.playMenuSound(row,false)
+ if row.enabled then SC.playMenuSound(row)row.nextPlay=os.clock()+row.interval
  else
-  row.pending=false row.ownerPaused=nil
-  if row.busy and row.current then pcall(function()row.current:Stop()end)end
-  row.busy=false
+  row.nextPlay=nil
  end
  if SC.sounds.update then SC.sounds.update()end
 end
 function SC.stopMenuSounds(cleanup)
  for _,row in ipairs(SC.sounds.rows)do
-  row.enabled=false row.pending=false row.ownerPaused=nil row.ownerPaused=nil
-  if row.busy and row.current then pcall(function()row.current:Stop()end)end
-  row.busy=false
-  if cleanup then SC.linkMenuSound(row,nil)end
+  row.enabled=false row.nextPlay=nil row.ownerPaused=nil
+  if row.current then pcall(function()row.current:Stop()end)end
+  for _,clone in ipairs(row.clones)do if clone.Parent then clone:Destroy()end end
+  table.clear(row.clones)table.clear(row.pausedClones)row.played=false
+  if cleanup then row.current=nil end
  end
  if cleanup then SC.sounds.closed=true end
  if SC.sounds.update then SC.sounds.update()end
 end
 function SC.drawSounds(panel)
  local scroll=make("ScrollingFrame",{Name="SoundList",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,
- ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,350)},panel)
+ ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,590)},panel)
  make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Sounds",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},scroll)
- local toggles={}
+ local toggles={}local intervals={}
  for index,row in ipairs(SC.sounds.rows)do
-  local y=38+(index-1)*44
+  local y=38+(index-1)*78
   local button=textButton(row.definition[1],scroll)button.Name="SoundPlay_"..index button.Position=UDim2.fromOffset(1,y)button.Size=UDim2.new(1,-51,0,36)
   local toggle=textButton("",scroll)toggle.Name="SoundAuto_"..index toggle.Position=UDim2.new(1,-43,0,y)toggle.Size=UDim2.fromOffset(36,36)toggle.TextSize=20
+  local interval=make("TextBox",{Name="SoundInterval_"..index,Position=UDim2.fromOffset(1,y+40),Size=UDim2.new(1,-7,0,28),BackgroundColor3=BLACK,
+   BorderSizePixel=0,TextColor3=WHITE,Font=Enum.Font.Code,TextSize=14,ClearTextOnFocus=false,TextEditable=true,TextXAlignment=Enum.TextXAlignment.Left},scroll)
+  make("UIStroke",{Color=WHITE,Thickness=1},interval)
   toggles[index]=toggle
-  button.Activated:Connect(function()SC.playMenuSound(row,true)end)
+  intervals[index]=interval
+  button.Activated:Connect(function()SC.playMenuSound(row)end)
   toggle.Activated:Connect(function()SC.setMenuSoundAuto(row,not row.enabled)end)
+  interval.FocusLost:Connect(function()SC.setMenuSoundInterval(row,interval.Text)if SC.sounds.update then SC.sounds.update()end end)
  end
  SC.sounds.update=function()
   for index,row in ipairs(SC.sounds.rows)do
    local toggle=toggles[index]toggle.Text=row.enabled and"✓"or""toggle.BackgroundColor3=row.enabled and WHITE or BLACK toggle.TextColor3=BLACK
+   if not intervals[index]:IsFocused()then intervals[index].Text=string.format("Replay every %.2fs",row.interval)end
   end
  end
  SC.sounds.update()
@@ -1110,14 +1124,11 @@ end
 connect(RS.Heartbeat,function(dt)
  local state=SC.sounds
  if state.closed or SC.paused or SC.soundsPaused then return end
- state.clock+=dt if state.clock<.1 then return end state.clock=0
+ state.clock+=dt if state.clock<.02 then return end state.clock=0
  local now=os.clock()
  for _,row in ipairs(state.rows)do
-  if row.current and row.busy then
-   if not row.current:IsDescendantOf(workspace)then SC.linkMenuSound(row,nil)
-   elseif not row.current.IsPlaying and now-(row.requestTime or now)>(row.current.IsLoaded and .3 or 10)then row.busy=false end
-  end
-  if(row.enabled or row.pending)and now>=(row.nextTry or 0)then SC.playMenuSound(row,false)end
+  for i=#row.clones,1,-1 do if not row.clones[i].Parent then table.remove(row.clones,i)end end
+  if row.enabled and row.nextPlay and now>=row.nextPlay then SC.playMenuSound(row)row.nextPlay=now+row.interval end
  end
 end)
 
@@ -1391,14 +1402,26 @@ function SC.setSoundsPaused(value)
  if not SC.sounds then return end
  for _,row in ipairs(SC.sounds.rows)do
   if value then
-   if row.busy and row.current and row.current.IsPlaying then
+   if row.played and row.current and row.current.IsPlaying then
     local ok=pcall(function()row.current:Pause()end)row.ownerPaused=ok
    end
-  elseif row.ownerPaused then
-   row.ownerPaused=nil
-   if not SC.paused and not SC.sounds.closed and row.current and row.current:IsDescendantOf(workspace)then
-    local ok=pcall(function()row.current:Resume()end)row.busy=ok row.requestTime=os.clock()
+   for _,clone in ipairs(row.clones)do
+    if clone.Parent and clone.IsPlaying then
+     local ok=pcall(function()clone:Pause()end)
+     if ok then table.insert(row.pausedClones,clone)end
+    end
    end
+  else
+   if row.ownerPaused then
+    row.ownerPaused=nil
+    if not SC.paused and not SC.sounds.closed and row.current and row.current:IsDescendantOf(workspace)then
+     pcall(function()row.current:Resume()end)
+    end
+   end
+   if not SC.paused and not SC.sounds.closed then
+    for _,clone in ipairs(row.pausedClones)do if clone.Parent then pcall(function()clone:Resume()end)end end
+   end
+   table.clear(row.pausedClones)
   end
  end
  if SC.sounds.update then SC.sounds.update()end
