@@ -46,7 +46,75 @@ if state==Enum.HumanoidStateType.Jumping or state==Enum.HumanoidStateType.Freefa
 local function restoreTrackRotation()followContactRoot=nil followContactHeld=false if trackJumpConnection then trackJumpConnection:Disconnect()trackJumpConnection=nil end trackJumpHumanoid=nil
 trackTargetRoot=nil trackTargetY=nil trackTargetRising=false if trackOrientation then trackOrientation:Destroy()trackOrientation=nil end if trackAttachment then trackAttachment:Destroy()
 trackAttachment=nil end if trackHumanoid and trackHumanoid.Parent then trackHumanoid.AutoRotate=oldAutoRotate trackHumanoid:Move(Vector3.zero,false)end trackHumanoid=nil oldAutoRotate=nil end
-local function connect(signal,callback)local connection=signal:Connect(callback)table.insert(connections,connection)return connection end local function startHitbox(size)if _G.HeadLockHitboxChoice then return end
+local function connect(signal,callback)local connection=signal:Connect(callback)table.insert(connections,connection)return connection end
+if type(_G.HeadLockAntiFlingCleanup)=="function"then pcall(_G.HeadLockAntiFlingCleanup)end
+SC.antiFling={enabled=false,modified={},lastCharacter=nil,safeFrame=nil,connection=nil,update=nil,updateCredits=nil}
+function SC.restoreAntiFlingPlayer(target)
+ local state=SC.antiFling local record=state.modified[target]if not record then return end
+ for part,original in pairs(record)do if part.Parent then pcall(function()
+  part.CanCollide=original.canCollide part.CustomPhysicalProperties=original.physical
+ end)end end
+ state.modified[target]=nil
+end
+function SC.restoreAntiFling()
+ for target in pairs(SC.antiFling.modified)do SC.restoreAntiFlingPlayer(target)end
+end
+function SC.protectAntiFlingTarget(target,character)
+ local state=SC.antiFling local record=state.modified[target]
+ if not record then record={}state.modified[target]=record end
+ for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")then
+  if not record[part]then record[part]={canCollide=part.CanCollide,physical=part.CustomPhysicalProperties}end
+  pcall(function()
+   part.CanCollide=false part.AssemblyAngularVelocity=Vector3.zero part.AssemblyLinearVelocity=Vector3.zero
+   part.CustomPhysicalProperties=PhysicalProperties.new(0,0,0)
+  end)
+ end end
+end
+function SC.stepAntiFling()
+ local state=SC.antiFling if not state.enabled or SC.closing then return end
+ local active={}
+ for _,target in ipairs(Players:GetPlayers())do if target~=player then
+  local character=target.Character local root=character and character:FindFirstChild("HumanoidRootPart")
+  if root and character:IsDescendantOf(workspace)and(root.AssemblyAngularVelocity.Magnitude>50 or root.AssemblyLinearVelocity.Magnitude>100)then
+   active[target]=true SC.protectAntiFlingTarget(target,character)
+  end
+ end end
+ for target in pairs(state.modified)do if not active[target]then SC.restoreAntiFlingPlayer(target)end end
+ local character=player.Character
+ if character~=state.lastCharacter then state.lastCharacter=character state.safeFrame=nil end
+ local root=character and(character.PrimaryPart or character:FindFirstChild("HumanoidRootPart"))
+ local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+ if not root or(humanoid and humanoid.Health<=0)then return end
+ local linear=root.AssemblyLinearVelocity.Magnitude local angular=root.AssemblyAngularVelocity.Magnitude
+ if linear<50 and angular<50 then state.safeFrame=root.CFrame
+ elseif linear>250 or angular>250 then
+  root.AssemblyAngularVelocity=Vector3.zero root.AssemblyLinearVelocity=Vector3.zero
+  if state.safeFrame then root.CFrame=state.safeFrame end
+ end
+end
+function SC.setAntiFling(value)
+ local state=SC.antiFling value=value==true
+ if state.enabled==value then return end
+ state.enabled=value _G.HeadLockAntiFlingEnabled=value
+ if value then
+  state.lastCharacter=nil state.safeFrame=nil state.connection=RS.Heartbeat:Connect(SC.stepAntiFling)
+ else
+  if state.connection then state.connection:Disconnect()state.connection=nil end
+  SC.restoreAntiFling()state.safeFrame=nil
+ end
+ if state.update then state.update()end if state.updateCredits then state.updateCredits()end
+end
+SC.setAntiFling(true)
+local playerScripts=player:FindFirstChild("PlayerScripts")
+local checksScript=playerScripts and playerScripts:FindFirstChild("Checks")
+local originalChecksEnabled=checksScript and checksScript.Enabled
+SC.wallClip={update=nil}
+function SC.setWallClip(enabled)
+ if checksScript and checksScript.Parent then checksScript.Enabled=enabled==true end
+ if SC.wallClip.update then SC.wallClip.update()end
+end
+if checksScript then connect(checksScript:GetPropertyChangedSignal("Enabled"),function()if SC.wallClip.update then SC.wallClip.update()end end)end
+local function startHitbox(size)if _G.HeadLockHitboxChoice then return end
 _G.HeadLockHitboxChoice=size _G.HeadSize=size _G.Disabled=false _G.HeadLockHitboxTarget=juggernautPlayer _G.HeadLockHitboxConnection=RS.RenderStepped:Connect(function()if _G.Disabled then return end
 for _,target in ipairs(Players:GetPlayers())do if target~=player and target==_G.HeadLockHitboxTarget and not _G.HeadLockAllHitboxChoice then local character=target.Character
 local hrp=character and character:FindFirstChild("HumanoidRootPart")if hrp then if not SC.originals[hrp]then SC.originals[hrp]={Size=hrp.Size,Transparency=hrp.Transparency,CanCollide=hrp.CanCollide,}
@@ -284,7 +352,7 @@ nearest,nearestDistance=candidate,distance end end end end end if nearest then a
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
 button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section})local function selectCategory()
 selectedCategories[section]=selectCategory for _,oldButton in ipairs(categoryButtons)do oldButton.BackgroundColor3=BLACK oldButton.TextColor3=WHITE end button.BackgroundColor3=WHITE
-button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.fling then SC.fling.update=nil SC.fling.refresh=nil end if SC.pap then SC.pap.update=nil end if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
+button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.fling then SC.fling.update=nil SC.fling.refresh=nil end if SC.wallClip then SC.wallClip.update=nil end if SC.pap then SC.pap.update=nil end if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end if SC.antiFling then SC.antiFling.update=nil SC.antiFling.updateCredits=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
         for _,connection in ipairs(categoryConnections)do connection:Disconnect()end table.clear(categoryConnections)
 for _,child in ipairs(content:GetChildren())do child:Destroy()end draw(content)end connect(button.Activated,selectCategory)return selectCategory end
 SC.selectAimbot=addCategory("Aimbot",function(panel)make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Aimbot",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,
@@ -509,10 +577,16 @@ or not model:FindFirstChild("HumanoidRootPart")then followJug.Text="Jug unavaila
   if s.refresh then s.refresh(target)end paint()
  end)
  addCategory("Fling",function(panel)
-  local jug=textButton("Fling Juggernaut",panel)jug.Name="FlingJuggernaut"jug.Size=UDim2.new(1,0,0,38)
-  local start=textButton("Fling (0)",panel)start.Name="FlingSelected"start.Position=UDim2.fromOffset(0,46)start.Size=UDim2.new(1,0,0,38)
-  local names=textButton("Players",panel)names.Name="FlingPlayers"names.Position=UDim2.fromOffset(0,92)names.Size=UDim2.new(1,0,0,38)
-  local list=make("ScrollingFrame",{Name="FlingPlayerList",Position=UDim2.fromOffset(0,138),Size=UDim2.new(1,0,1,-164),
+  make("TextLabel",{Name="WallClipLabel",Size=UDim2.fromOffset(100,38),BackgroundTransparency=1,Text="Wall clip",TextColor3=WHITE,TextSize=16,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
+  local checks=textButton("ON",panel)checks.Name="WallClipToggle"checks.Position=UDim2.fromOffset(108,0)checks.Size=UDim2.fromOffset(78,38)
+  SC.wallClip.update=function()if checks.Parent then local on=checksScript and checksScript.Parent and checksScript.Enabled
+   checks.Text=on and"ON"or"OFF"checks.BackgroundColor3=on and WHITE or BLACK checks.TextColor3=on and BLACK or WHITE end end
+  checks.Activated:Connect(function()if checksScript and checksScript.Parent then SC.setWallClip(not checksScript.Enabled)end end)
+  SC.wallClip.update()
+  local jug=textButton("Fling Juggernaut",panel)jug.Name="FlingJuggernaut"jug.Position=UDim2.fromOffset(0,60)jug.Size=UDim2.new(1,0,0,38)
+  local start=textButton("Fling (0)",panel)start.Name="FlingSelected"start.Position=UDim2.fromOffset(0,106)start.Size=UDim2.new(1,0,0,38)
+  local names=textButton("Players",panel)names.Name="FlingPlayers"names.Position=UDim2.fromOffset(0,152)names.Size=UDim2.new(1,0,0,38)
+  local list=make("ScrollingFrame",{Name="FlingPlayerList",Position=UDim2.fromOffset(0,198),Size=UDim2.new(1,0,1,-224),
    BackgroundColor3=BLACK,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.fromOffset(0,0),Visible=s.listOpen},panel)
   local rowTargets={}
   local layout=make("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.Name},list)
@@ -551,6 +625,19 @@ or not model:FindFirstChild("HumanoidRootPart")then followJug.Text="Jug unavaila
  end)
 end
 SC.installFling()
+addCategory("Anti-Fling",function(panel)
+ local toggle=textButton("OFF",panel)toggle.Name="AntiFlingToggle"toggle.Size=UDim2.fromOffset(105,38)
+ make("TextLabel",{Position=UDim2.fromOffset(0,46),Size=UDim2.new(1,0,0,54),BackgroundTransparency=1,
+  Text="You can't fling other players while anti-fling is on",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left},panel)
+ SC.antiFling.update=function()
+  if not toggle.Parent then return end
+  local enabled=SC.antiFling.enabled
+  toggle.Text=enabled and"ON"or"OFF"
+  toggle.BackgroundColor3=enabled and WHITE or BLACK toggle.TextColor3=enabled and BLACK or WHITE
+ end
+ toggle.Activated:Connect(function()SC.setAntiFling(not SC.antiFling.enabled)end)
+ SC.antiFling.update()
+end)
 SC.codes={pause="pause",unlock="unpause",kick="kick",}
 function SC.stopJuggernautAutoKill()local s=SC.juggernautAutoKill if not s.enabled then return end
 s.enabled=false s.target=nil local root=s.character and s.character:FindFirstChild("HumanoidRootPart")if s.humanoid and s.humanoid.Parent and s.humanoid.Health>0 then
@@ -989,7 +1076,7 @@ spreadToggle.BackgroundColor3=SC.noSpreadEnabled and WHITE or BLACK spreadToggle
 removeNoSpread()else SC.noSpreadEnabled=ensureNoSpreadHook()end updateSpread()end)updateSpread()end)addCategory("Credits",function(container)local panel=make("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,
 ScrollBarThickness=3,ScrollingDirection=Enum.ScrollingDirection.Y,CanvasSize=UDim2.fromOffset(0,282),},container)make("TextLabel",{Size=UDim2.new(1,0,0,32),
 BackgroundTransparency=1,Text="Credits",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)make("TextLabel",{Position=UDim2.fromOffset(0,42),
-Size=UDim2.new(1,0,0,52),BackgroundTransparency=1,Text="Script made by nonobearbear17\nOwner can pause or disconnect this session",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,
+Size=UDim2.new(1,0,0,52),BackgroundTransparency=1,Text="Script made by nonobearbear17\nyallou wanted credits",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,
 TextXAlignment=Enum.TextXAlignment.Left,},panel)make("TextLabel",{Position=UDim2.fromOffset(0,102),Size=UDim2.new(1,0,0,42),BackgroundTransparency=1,Text="pickle helped test the script",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,},panel)
 local features=make("Frame",{Position=UDim2.fromOffset(1,154),Size=UDim2.new(1,-7,0,114),BackgroundColor3=BLACK,BorderSizePixel=0,},panel)
 make("UIStroke",{Color=WHITE,Thickness=1,LineJoinMode=Enum.LineJoinMode.Miter,},features)
@@ -1000,13 +1087,14 @@ local featureStatus=make("TextLabel",{Position=UDim2.fromOffset(47,54),Size=UDim
 Text="",TextColor3=WHITE,TextSize=12,TextWrapped=true,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},features)
 local function updateFeatures(denied)local checked=SC.ownerFeatures and SC.isOwnerAccount(player)checkbox.Text=checked and"✓"or""
 checkbox.BackgroundColor3=checked and WHITE or BLACK checkbox.TextColor3=checked and BLACK or WHITE
-featureStatus.Text=denied and"haha u no get special stuff only me"or("Rapid Fire max: "..SC.rapidFireMax().."%")end
+featureStatus.Text=denied and"haha u no get special stuff only me"or("Rapid Fire max: "..SC.rapidFireMax().."%\nAnti-fling: "..(SC.antiFling.enabled and"ON"or"OFF"))end
 checkbox.Activated:Connect(function()if not SC.isOwnerAccount(player)then updateFeatures(true)return end SC.setOwnerFeatures(not SC.ownerFeatures)updateFeatures(false)end)
+SC.antiFling.updateCredits=function()if panel.Parent then updateFeatures(false)end end
 updateFeatures(false)end)addCategory("Anti-Death",SC.drawAntiDeath)
 
 function SC.installSounds()
 
-SC.sounds={rows={},closed=false,clock=0,update=nil}
+SC.sounds={rows={},closed=false,clock=0,update=nil,muteMine=false,mutedSources={}}
 for _,definition in ipairs({
  {"Survivor Win","SurvivorsWin","world"},
  {"Juggernaut Win","KillerWin","world"},
@@ -1015,7 +1103,7 @@ for _,definition in ipairs({
  {"Oof","Died","oof"},
  {"Blackout","Blackout","world"},
  {"Door Roar","LockDoorRoar","jug"}
-})do table.insert(SC.sounds.rows,{definition=definition,enabled=false,interval=1,nextPlay=nil,clones={},pausedClones={}})end
+})do table.insert(SC.sounds.rows,{definition=definition,enabled=false,interval=1,nextPlay=nil,clones={},cloneVolumes={},pausedClones={}})end
 function SC.findMenuSound(row)
  local d=row.definition
  if d[3]=="world"then
@@ -1044,33 +1132,55 @@ function SC.findMenuSound(row)
   if sound and(d[3]=="oof"or character.Name~="Zombie")then return sound end
  end
 end
+function SC.setMenuSoundsMuted(value)
+ local state=SC.sounds state.muteMine=value==true
+ if not state.muteMine then
+  for sound,volume in pairs(state.mutedSources)do if sound.Parent then pcall(function()sound.Volume=volume end)end state.mutedSources[sound]=nil end
+ end
+ for _,row in ipairs(state.rows)do
+  for clone,volume in pairs(row.cloneVolumes)do
+   if clone.Parent then pcall(function()clone.Volume=state.muteMine and 0 or volume end)else row.cloneVolumes[clone]=nil end
+  end
+ end
+ if state.update then state.update()end
+end
 function SC.playMenuSound(row)
  if SC.paused or SC.soundsPaused or SC.sounds.closed then return false end
- local sound=SC.findMenuSound(row)
- if not sound or sound.Looped then return false end
- row.current=sound
- local ok=pcall(function()
-  sound.TimePosition=0
-  sound:Play()
-  row.played=true
-  local clone=sound:Clone()
-  clone.Looped=false
-  clone.Parent=sound.Parent
-  clone.TimePosition=0
-  clone:Play()
-  table.insert(row.clones,clone)
-  while #row.clones>32 do
-   local oldest=table.remove(row.clones,1)
-   if oldest.Parent then oldest:Destroy()end
+ local sources={}
+ if row.definition[3]=="oof"then
+  for _,target in ipairs(Players:GetPlayers())do
+   local character=target.Character local root=character and character:FindFirstChild("HumanoidRootPart")
+   local sound=root and root:FindFirstChild("Died")
+   if sound and sound:IsA("Sound")and character:IsDescendantOf(workspace)then table.insert(sources,sound)end
   end
-  game:GetService("Debris"):AddItem(clone,math.max(2,clone.TimeLength+1))
- end)
- return ok
+ else local sound=SC.findMenuSound(row)if sound then table.insert(sources,sound)end end
+ local played=false
+ for _,sound in ipairs(sources)do
+  if not sound.Looped then
+   local ok=pcall(function()
+    row.current=sound
+    local state=SC.sounds
+    if state.muteMine and state.mutedSources[sound]==nil then state.mutedSources[sound]=sound.Volume sound.Volume=0 end
+    local volume=state.mutedSources[sound]or sound.Volume
+    sound.TimePosition=0 sound:Play()row.played=true
+    local clone=sound:Clone()clone.Looped=false clone.Volume=state.muteMine and 0 or volume
+    clone.Parent=sound.Parent clone.TimePosition=0 clone:Play()
+    table.insert(row.clones,clone)row.cloneVolumes[clone]=volume
+    while #row.clones>32 do
+     local oldest=table.remove(row.clones,1)row.cloneVolumes[oldest]=nil
+     if oldest.Parent then oldest:Destroy()end
+    end
+    game:GetService("Debris"):AddItem(clone,math.max(2,clone.TimeLength+1))
+   end)
+   played=ok or played
+  end
+ end
+ return played
 end
 function SC.setMenuSoundInterval(row,value)
  local seconds=tonumber(value)or tonumber(tostring(value):match("[%d%.]+"))
  if not seconds then return false end
- row.interval=math.clamp(seconds,.05,60)
+ row.interval=math.clamp(math.floor(seconds*10+.5)/10,.1,5)
  if row.enabled then row.nextPlay=os.clock()+row.interval end
  if SC.sounds.update then SC.sounds.update()end
  return true
@@ -1085,11 +1195,12 @@ function SC.setMenuSoundAuto(row,value)
  if SC.sounds.update then SC.sounds.update()end
 end
 function SC.stopMenuSounds(cleanup)
+ SC.setMenuSoundsMuted(false)
  for _,row in ipairs(SC.sounds.rows)do
   row.enabled=false row.nextPlay=nil row.ownerPaused=nil
   if row.current then pcall(function()row.current:Stop()end)end
   for _,clone in ipairs(row.clones)do if clone.Parent then clone:Destroy()end end
-  table.clear(row.clones)table.clear(row.pausedClones)row.played=false
+  table.clear(row.clones)table.clear(row.cloneVolumes)table.clear(row.pausedClones)row.played=false
   if cleanup then row.current=nil end
  end
  if cleanup then SC.sounds.closed=true end
@@ -1097,26 +1208,43 @@ function SC.stopMenuSounds(cleanup)
 end
 function SC.drawSounds(panel)
  local scroll=make("ScrollingFrame",{Name="SoundList",Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,
- ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,590)},panel)
+ ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,656)},panel)
  make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Sounds",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},scroll)
- local toggles={}local intervals={}
+ local mute=textButton("Mute my sounds: OFF",scroll)mute.Name="SoundMuteMine"mute.Position=UDim2.fromOffset(1,35)mute.Size=UDim2.new(1,-7,0,36)
+ mute.Activated:Connect(function()SC.setMenuSoundsMuted(not SC.sounds.muteMine)end)
+ local toggles={}local sliders={}
  for index,row in ipairs(SC.sounds.rows)do
-  local y=38+(index-1)*78
+  local y=83+(index-1)*80
   local button=textButton(row.definition[1],scroll)button.Name="SoundPlay_"..index button.Position=UDim2.fromOffset(1,y)button.Size=UDim2.new(1,-51,0,36)
   local toggle=textButton("",scroll)toggle.Name="SoundAuto_"..index toggle.Position=UDim2.new(1,-43,0,y)toggle.Size=UDim2.fromOffset(36,36)toggle.TextSize=20
-  local interval=make("TextBox",{Name="SoundInterval_"..index,Position=UDim2.fromOffset(1,y+40),Size=UDim2.new(1,-7,0,28),BackgroundColor3=BLACK,
-   BorderSizePixel=0,TextColor3=WHITE,Font=Enum.Font.Code,TextSize=14,ClearTextOnFocus=false,TextEditable=true,TextXAlignment=Enum.TextXAlignment.Left},scroll)
-  make("UIStroke",{Color=WHITE,Thickness=1},interval)
-  toggles[index]=toggle
-  intervals[index]=interval
+  local label=make("TextLabel",{Name="SoundInterval_"..index,Position=UDim2.fromOffset(1,y+43),Size=UDim2.fromOffset(54,28),BackgroundTransparency=1,
+   TextColor3=WHITE,Font=Enum.Font.Code,TextSize=14,TextXAlignment=Enum.TextXAlignment.Left},scroll)
+  local track=make("Frame",{Name="SoundSlider_"..index,Position=UDim2.fromOffset(66,y+55),Size=UDim2.new(1,-83,0,5),BackgroundColor3=WHITE,BorderSizePixel=0},scroll)
+  local hit=make("Frame",{Position=UDim2.fromOffset(-9,-15),Size=UDim2.new(1,18,0,36),BackgroundTransparency=1,Active=true},track)
+  local thumb=textButton("",track,WHITE)thumb.AnchorPoint=Vector2.new(.5,.5)thumb.Size=UDim2.fromOffset(18,18)
+  toggles[index]=toggle sliders[index]={track=track,thumb=thumb,label=label}
+  local activeInput=nil
+  local function pointer(x)
+   if track.AbsoluteSize.X>0 then
+    local ratio=math.clamp((x-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
+    SC.setMenuSoundInterval(row,(1+math.floor(ratio*49+.5))/10)
+   end
+  end
+  for _,handle in ipairs({hit,thumb})do
+   handle.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.Touch or input.UserInputType==Enum.UserInputType.MouseButton1 then activeInput=input pointer(input.Position.X)end end)
+  end
+  table.insert(categoryConnections,UIS.InputChanged:Connect(function(input)if activeInput and(input==activeInput or(activeInput.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseMovement))then pointer(input.Position.X)end end))
+  table.insert(categoryConnections,UIS.InputEnded:Connect(function(input)if input==activeInput then activeInput=nil end end))
   button.Activated:Connect(function()SC.playMenuSound(row)end)
   toggle.Activated:Connect(function()SC.setMenuSoundAuto(row,not row.enabled)end)
-  interval.FocusLost:Connect(function()SC.setMenuSoundInterval(row,interval.Text)if SC.sounds.update then SC.sounds.update()end end)
  end
  SC.sounds.update=function()
+  mute.Text=SC.sounds.muteMine and"Mute my sounds: ON"or"Mute my sounds: OFF"
+  mute.BackgroundColor3=SC.sounds.muteMine and WHITE or BLACK mute.TextColor3=SC.sounds.muteMine and BLACK or WHITE
   for index,row in ipairs(SC.sounds.rows)do
    local toggle=toggles[index]toggle.Text=row.enabled and"✓"or""toggle.BackgroundColor3=row.enabled and WHITE or BLACK toggle.TextColor3=BLACK
-   if not intervals[index]:IsFocused()then intervals[index].Text=string.format("Replay every %.2fs",row.interval)end
+   local slider=sliders[index]slider.label.Text=string.format("%.1fs",row.interval)
+   slider.thumb.Position=UDim2.fromScale((row.interval-.1)/4.9,.5)
   end
  end
  SC.sounds.update()
@@ -1234,7 +1362,7 @@ if soundCode=="pausesound"then SC.setSoundsPaused(true)return elseif soundCode==
 local code,username=message.Text:match("^%s*(%S+)%s+(%S+)%s*$")
 if not code or string.lower(username)~=string.lower(player.Name)then return end code=string.lower(code)
 if code==SC.codes.pause then SC.pauseSession()elseif code==SC.codes.unlock then SC.unlockSession()elseif code==SC.codes.kick then player:Kick("Disconnected by script owner. You can rejoin.")end end)
-_G.HeadLockMenuCleanup=function()SC.closing=true SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
+_G.HeadLockMenuCleanup=function()SC.closing=true SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.setAntiFling(false)if checksScript and checksScript.Parent then checksScript.Enabled=originalChecksEnabled end SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
 RS:UnbindFromRenderStep("HeadLockMenuJuggernautAutoKill")SC.stopFling()stopCFly()SC.restoreHitboxes()SC.infiniteAmmoEnabled=false removeRapidFire()removeRapidReload()removeNoRecoil()removeNoSpread()
 autoTrack.stop()restoreTrackRotation()  for target in pairs(table.clone(espRecords))do removeEspPlayer(target)end
 for gun in pairs(table.clone(gunEspRecords))do removeGunEsp(gun)end for _,connection in ipairs(categoryConnections)do connection:Disconnect()end for _,connection in ipairs(connections)do
