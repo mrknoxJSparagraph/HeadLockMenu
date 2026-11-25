@@ -1,5 +1,5 @@
--- SAKTK hosted build 20261124-sounds: complete source, no clipboard packing.
--- HeadLockMenu - complete standalone script. Paste the entire file.
+
+
 local __boot={}
 pcall(function()
 local p=game:GetService("Players").LocalPlayer
@@ -228,7 +228,7 @@ local function updateCFlyMobileButtons()local show=SC.cFlyEnabled and UIS.TouchE
 SC.cFlyDownHeld=false cFlyUpInput=nil cFlyDownInput=nil end end local function stopCFly()SC.cFlyEnabled=false SC.cFlyFollowJug=false RS:UnbindFromRenderStep(FLY_RENDER_NAME)SC.cFlyUpHeld=false
 SC.cFlyDownHeld=false cFlyUpInput=nil cFlyDownInput=nil cFlyUpButton.Visible=false cFlyDownButton.Visible=false if cFlyRoot and cFlyRoot.Parent then cFlyRoot.Anchored=cFlyAnchored
 cFlyRoot.AssemblyLinearVelocity=Vector3.zero end for part,canCollide in pairs(cFlyCollisions)do if part.Parent then part.CanCollide=canCollide end end table.clear(cFlyCollisions)cFlyRoot=nil
-cFlyAnchored=nil if updateCFlyPanel then updateCFlyPanel()end end local function startCFly()local character=player.Character local root=character and character:FindFirstChild("HumanoidRootPart")
+cFlyAnchored=nil if updateCFlyPanel then updateCFlyPanel()end end local function startCFly()if SC.tripKind then return false end local character=player.Character local root=character and character:FindFirstChild("HumanoidRootPart")
 local humanoid=character and character:FindFirstChildOfClass("Humanoid")if not root or not humanoid or humanoid.Health<=0 then return false end cFlyRoot=root cFlyAnchored=root.Anchored
 SC.cFlyEnabled=true SC.cFlyNotice=""SC.speedEnabled=false SC.trackEnabled=false SC.followEnabled=false autoTrack.stop()restoreTrackRotation()for _,part in ipairs(character:GetDescendants())do if part:IsA("BasePart")then
 cFlyCollisions[part]=part.CanCollide part.CanCollide=false end end root.Anchored=true root.AssemblyLinearVelocity=Vector3.zero updateCFlyMobileButtons()
@@ -284,7 +284,7 @@ nearest,nearestDistance=candidate,distance end end end end end if nearest then a
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
 button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section})local function selectCategory()
 selectedCategories[section]=selectCategory for _,oldButton in ipairs(categoryButtons)do oldButton.BackgroundColor3=BLACK oldButton.TextColor3=WHITE end button.BackgroundColor3=WHITE
-button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
+button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
         for _,connection in ipairs(categoryConnections)do connection:Disconnect()end table.clear(categoryConnections)
 for _,child in ipairs(content:GetChildren())do child:Destroy()end draw(content)end connect(button.Activated,selectCategory)return selectCategory end
 SC.selectAimbot=addCategory("Aimbot",function(panel)make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Aimbot",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,
@@ -353,7 +353,7 @@ or not model:FindFirstChild("HumanoidRootPart")then followJug.Text="Jug unavaila
 local state=SC.fling if not state.active then return end state.active=false local root=state.root if root and root.Parent then root.AssemblyLinearVelocity=Vector3.zero
 root.AssemblyAngularVelocity=Vector3.zero if state.home and state.character and state.character.Parent and state.character:FindFirstChildOfClass("Humanoid")
 and state.character:FindFirstChildOfClass("Humanoid").Health>0 then state.character:PivotTo(state.home)end root.CanCollide=state.canCollide root.CollisionGroup=state.collisionGroup end state.root=nil
-state.character=nil state.home=nil if state.status then state.status.Text="Ready"end end function SC.startFling()local state=SC.fling if state.active or SC.paused then return end
+state.character=nil state.home=nil if state.status then state.status.Text="Ready"end end function SC.startFling()local state=SC.fling if state.active or SC.paused or SC.tripKind then return end
 updateJuggernaut()if SC.isOwnerAccount(juggernautPlayer)then if state.status and state.status.Parent then state.status.Text="nuh uh you cant kill me"end return end
 if SC.stopJuggernautAutoKill then SC.stopJuggernautAutoKill()end local target=juggernautPlayer and juggernautPlayer.Character
 local targetRoot=target and target:FindFirstChild("HumanoidRootPart")local targetHumanoid=target and target:FindFirstChildOfClass("Humanoid")local character=player.Character
@@ -610,16 +610,15 @@ function SC.cycleSpectate(direction)
  if s.enabled then SC.applySpectate()end SC.updateSpectateOverlay()if s.update then s.update()end
 end
 addCategory("Spectate",function(panel)
- make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Spectate",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
- local toggle=textButton("OFF",panel)toggle.Position=UDim2.fromOffset(0,40)toggle.Size=UDim2.fromOffset(105,38)
- make("TextLabel",{Position=UDim2.fromOffset(0,95),Size=UDim2.new(1,0,0,65),BackgroundTransparency=1,
-Text="The username and arrows appear above your hotbar while Spectate is ON. They remain available when you hide this menu.",
-TextColor3=WHITE,TextSize=12,Font=Enum.Font.Code,TextWrapped=true},panel)
+ local toggle=textButton("OFF",panel)toggle.Name="CustomSpectateToggle"toggle.Position=UDim2.fromOffset(0,0)toggle.Size=UDim2.fromOffset(105,38)
+ local gameButton=textButton("GAME: ON",panel)gameButton.Name="GameSpectateToggle"gameButton.Position=UDim2.fromOffset(0,48)gameButton.Size=UDim2.fromOffset(140,38)
  local function update()
-  if not panel.Parent then return end local s=SC.spectate toggle.Text=s.enabled and"ON"or"OFF"toggle.BackgroundColor3=s.enabled and WHITE or BLACK toggle.TextColor3=s.enabled and BLACK or WHITE
+  if not panel.Parent then return end local state=SC.spectate toggle.Text=state.enabled and"ON"or"OFF"toggle.BackgroundColor3=state.enabled and WHITE or BLACK toggle.TextColor3=state.enabled and BLACK or WHITE
+  local hidden=SC.nativeSpectator and SC.nativeSpectator.disabled gameButton.Text=hidden and"GAME: OFF"or"GAME: ON"gameButton.BackgroundColor3=hidden and WHITE or BLACK gameButton.TextColor3=hidden and BLACK or WHITE
  end
  SC.spectate.update=update if not SC.spectate.target then SC.cycleSpectate(1)end
  toggle.Activated:Connect(function()SC.setSpectate(not SC.spectate.enabled)end)
+ gameButton.Activated:Connect(function()if SC.nativeSpectator then SC.setGameSpectatorDisabled(not SC.nativeSpectator.disabled)end end)
  update()
 end)
 SC.anti={role=nil,humanoid=nil,character=nil,lastHealth=0,max=0,connection=nil,update=nil,
@@ -662,7 +661,7 @@ function SC.onAntiHealth(health,source)
  if a.role=="juggernaut"and health>previous then SC.resetAntiRound(a.role,a.max,health)end
  if a.role=="survivor"and health>previous and health>s.threshold then s.spent=false s.firedThreshold=nil end
  local root=a.character and a.character:FindFirstChild("HumanoidRootPart")
- if not SC.paused and s.enabled and not s.spent and health>0 and health<previous and health<=s.threshold and root and root.Position.Y<SC.combatYLimit then
+ if not SC.paused and not SC.tripKind and s.enabled and not s.spent and health>0 and health<previous and health<=s.threshold and root and root.Position.Y<SC.combatYLimit then
   s.spent=true s.firedThreshold=s.threshold
   SC.stopConflictingMovement()
   if not SC.teleportWaypoint(SC.safeWaypoint)then s.spent=false s.firedThreshold=nil end
@@ -712,6 +711,7 @@ function SC.drawAntiDeath(panel)
  SC.anti.update()
 end
 function SC.stopExtraFeatures(cleanup)
+ if SC.stopTrips then SC.stopTrips(cleanup)end
  if SC.stopMenuSounds then SC.stopMenuSounds(cleanup)end
  SC.setSpectate(false)SC.anti.survivor.enabled=false SC.anti.juggernaut.enabled=false
  if cleanup and SC.anti.connection then SC.anti.connection:Disconnect()SC.anti.connection=nil end
@@ -721,11 +721,12 @@ SC.extraClock=0
 connect(RS.Heartbeat,function(dt)
  SC.extraClock+=dt if SC.extraClock<0.15 then return end SC.extraClock=0
  SC.syncAntiDeath()if SC.anti.update then SC.anti.update()end
+ if SC.serviceGameSpectator then SC.serviceGameSpectator()SC.syncPAPSide()end
  if SC.spectate.enabled then SC.applySpectate()end if SC.spectate.update then SC.spectate.update()end
 end)
 SC.syncAntiDeath()
 SC.gravity={enabled=false,scale=1}SC.stopGravity=function()local state=SC.gravity if state.force then state.force:Destroy()end if state.attachment then state.attachment:Destroy()end state.root=nil
-state.force=nil state.attachment=nil end connect(RS.Heartbeat,function()local state=SC.gravity if not state.enabled then return end local character=player.Character
+state.force=nil state.attachment=nil end connect(RS.Heartbeat,function()local state=SC.gravity if not state.enabled or SC.tripKind then return end local character=player.Character
 local humanoid=character and character:FindFirstChildOfClass("Humanoid")local root=character and character:FindFirstChild("HumanoidRootPart")if not root or not humanoid or humanoid.Health<=0 then
 if state.force then SC.stopGravity()end return end if state.root~=root or not state.force or not state.force.Parent then SC.stopGravity()local attachment=Instance.new("Attachment")
 attachment.Name="HeadLockGravityAttachment"attachment.Parent=root local force=Instance.new("VectorForce")force.Name="HeadLockGravityForce"force.Attachment0=attachment
@@ -826,9 +827,9 @@ checkbox.BackgroundColor3=checked and WHITE or BLACK checkbox.TextColor3=checked
 featureStatus.Text=denied and"haha u no get special stuff only me"or("Rapid Fire max: "..SC.rapidFireMax().."%")end
 checkbox.Activated:Connect(function()if not SC.isOwnerAccount(player)then updateFeatures(true)return end SC.setOwnerFeatures(not SC.ownerFeatures)updateFeatures(false)end)
 updateFeatures(false)end)addCategory("Anti-Death",SC.drawAntiDeath)
--- Keep sound setup out of the main startup function.
+
 function SC.installSounds()
--- Sound playback uses existing game objects only; no local overlapping copies.
+
 SC.sounds={rows={},closed=false,clock=0,update=nil}
 for _,definition in ipairs({
  {"Survivor Win","SurvivorsWin","world"},
@@ -879,7 +880,7 @@ function SC.linkMenuSound(row,sound)
  end
 end
 function SC.playMenuSound(row,queue)
- if SC.paused or SC.sounds.closed then return false end
+ if SC.paused or SC.soundsPaused or SC.sounds.closed then return false end
  local sound=SC.findMenuSound(row)
  SC.linkMenuSound(row,sound)
  if not sound or sound.Looped then return false end
@@ -894,7 +895,7 @@ function SC.setMenuSoundAuto(row,value)
  row.enabled=value==true and not SC.paused
  if row.enabled then SC.playMenuSound(row,false)
  else
-  row.pending=false
+  row.pending=false row.ownerPaused=nil
   if row.busy and row.current then pcall(function()row.current:Stop()end)end
   row.busy=false
  end
@@ -902,7 +903,7 @@ function SC.setMenuSoundAuto(row,value)
 end
 function SC.stopMenuSounds(cleanup)
  for _,row in ipairs(SC.sounds.rows)do
-  row.enabled=false row.pending=false
+  row.enabled=false row.pending=false row.ownerPaused=nil row.ownerPaused=nil
   if row.busy and row.current then pcall(function()row.current:Stop()end)end
   row.busy=false
   if cleanup then SC.linkMenuSound(row,nil)end
@@ -932,7 +933,7 @@ function SC.drawSounds(panel)
 end
 connect(RS.Heartbeat,function(dt)
  local state=SC.sounds
- if state.closed or SC.paused then return end
+ if state.closed or SC.paused or SC.soundsPaused then return end
  state.clock+=dt if state.clock<.1 then return end state.clock=0
  local now=os.clock()
  for _,row in ipairs(state.rows)do
@@ -958,7 +959,7 @@ end)
 local function selectGame()
 SC.activeGame="SAKTK"
 categories.CanvasPosition=Vector2.zero local selectCurrent=selectedCategories.SAKTK or SC.selectAimbot
-selectCurrent()updateJuggernaut()end
+selectCurrent()updateJuggernaut()if SC.syncPAPSide then SC.syncPAPSide()end end
 local control=make("Frame",{Name="MiniControl",
 Position=UDim2.fromOffset(14,14),Size=UDim2.fromOffset(105,76),BackgroundColor3=BLACK,BorderSizePixel=0,Visible=false,},gui)
 make("UIStroke",{Color=WHITE,Thickness=1,LineJoinMode=Enum.LineJoinMode.Miter},control)local lockButton=textButton("Lock",control)lockButton.Position=UDim2.fromOffset(4,4)
@@ -989,7 +990,7 @@ BackgroundColor3=BLACK,Text="Menu paused by owner",TextColor3=WHITE,TextSize=14,
 local loadingStarted=false local function tryPassword()if loadingStarted then return end if passwordBox.Text==PASSWORD then loadingStarted=true passwordBox:ReleaseFocus()passwordBox.Visible=false
 SC.errorText.Visible=false SC.enterButton.Visible=false passwordTitle.Text="Opening menu"loadingText.Visible=true loadingBar.Visible=true task.spawn(function()local start=os.clock()
 local duration=0.65 while shade.Parent and os.clock()-start<duration do local elapsed=os.clock()-start loadingText.Text="Loading"..string.rep(".",math.floor(elapsed*7)%4)
-loadingFill.Size=UDim2.fromScale(math.min(elapsed/duration,1),1)task.wait(0.04)end if not shade.Parent then return end shade:Destroy()main.Visible=not SC.paused control.Visible=not SC.paused
+loadingFill.Size=UDim2.fromScale(math.min(elapsed/duration,1),1)task.wait(0.04)end if not shade.Parent then return end shade:Destroy()SC.authenticated=true if SC.syncPAPSide then SC.syncPAPSide()end main.Visible=not SC.paused control.Visible=not SC.paused
  selectGame("SAKTK")end)else SC.errorText.Text="Wrong password. Try again."passwordBox.Text=""end end connect(SC.enterButton.Activated,tryPassword)
 connect(passwordBox.FocusLost,function(enterPressed)if enterPressed then tryPassword()end end)for _,target in ipairs(Players:GetPlayers())do addEspPlayer(target)end SC.gunEspTimer=0
 connect(workspace.DescendantAdded,function(descendant)if SC.gunEspEnabled and descendant:IsA("ProximityPrompt")then addGunFromPrompt(descendant)end end)connect(RS.Heartbeat,function(dt)
@@ -1005,7 +1006,7 @@ end if updateTrackPlayers then updateTrackPlayers()end if updateFollowPlayers th
 local target=SC.trackEnabled and SC.trackPlayer or(SC.followEnabled and SC.followPlayer or nil)
 if SC.canSelectPlayer(target)then return target end end local function torsoReach(part,direction)local frame=part.CFrame
 return math.abs(direction:Dot(frame.RightVector))*part.Size.X*0.5+math.abs(direction:Dot(frame.LookVector))*part.Size.Z*0.5 end
-RS:BindToRenderStep(TRACK_RENDER_NAME,Enum.RenderPriority.Character.Value+1,function(dt)if SC.cFlyEnabled then return end local now=os.clock()autoTrack.service(now)local target=currentTrackTarget()
+RS:BindToRenderStep(TRACK_RENDER_NAME,Enum.RenderPriority.Character.Value+1,function(dt)if SC.cFlyEnabled or SC.tripKind then return end local now=os.clock()autoTrack.service(now)local target=currentTrackTarget()
 if not target then if trackHumanoid then restoreTrackRotation()end return end local character=player.Character
 local humanoid=character and character:FindFirstChildOfClass("Humanoid")local root=character and character:FindFirstChild("HumanoidRootPart")
 local targetCharacter=target:IsA("Player")and target.Character or target local targetRoot=targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
@@ -1027,7 +1028,7 @@ local bodyDirection=bodyDistance>0.01 and bodyFlat.Unit or direction contactDist
 if bodyDistance<=contactDistance then followContactHeld=true end if followContactHeld and bodyDistance<=contactDistance+0.25 then humanoid:Move(Vector3.zero,false)return end followContactHeld=false
 else followContactRoot=nil followContactHeld=false end local turn=SC.trackEnabled and math.rad(-60)or 0
 trackOrientation.CFrame=CFrame.lookAt(Vector3.zero,direction)*CFrame.Angles(0,turn,0)humanoid:Move((SC.followEnabled or flat.Magnitude>2.5)and direction or Vector3.zero,false)end)
-connect(RS.Heartbeat,function(dt)if not SC.speedEnabled or SC.tpSpeed<=0 then return end local character=player.Character local humanoid=character and character:FindFirstChildOfClass("Humanoid")
+connect(RS.Heartbeat,function(dt)if not SC.speedEnabled or SC.tpSpeed<=0 or SC.tripKind then return end local character=player.Character local humanoid=character and character:FindFirstChildOfClass("Humanoid")
 local root=character and character:FindFirstChild("HumanoidRootPart")if humanoid and root and not root.Anchored and humanoid.Health>0 and not humanoid.Sit then local direction=humanoid.MoveDirection
 if direction.Magnitude>0 then character:TranslateBy(direction*SC.tpSpeed*10*dt)end end end)RS:BindToRenderStep(RENDER_NAME,Enum.RenderPriority.Camera.Value+1,function()
 if not SC.enabled or not SC.canSelectPlayer(SC.selectedPlayer)then return end local targetCharacter=SC.selectedPlayer.Character local targetPart if targetCharacter then if SC.aimPart=="Head"then
@@ -1038,12 +1039,15 @@ SC.mainWasVisible=main.Visible SC.enabled=false SC.speedEnabled=false SC.gravity
     autoTrack.stop()restoreTrackRotation() stopCFly()removeRapidFire()removeRapidReload()SC.infiniteAmmoEnabled=false removeNoRecoil()
 removeNoSpread() SC.restoreHitboxes()SC.espEnabled=false SC.gunEspEnabled=false for _,record in pairs(espRecords)do clearEspVisual(record)end
 for gun in pairs(table.clone(gunEspRecords))do removeGunEsp(gun)end main.Visible=false control.Visible=false   SC.banner.Visible=true end function SC.unlockSession()
-if not SC.paused then return end SC.paused=false SC.banner.Visible=false if not shade.Parent then control.Visible=true main.Visible=SC.mainWasVisible hideButton.Text=main.Visible and"Hide"or"Unhide"
+if not SC.paused then return end SC.paused=false SC.banner.Visible=false if SC.syncPAPSide then SC.syncPAPSide()end if not shade.Parent then control.Visible=true main.Visible=SC.mainWasVisible hideButton.Text=main.Visible and"Hide"or"Unhide"
 selectGame(SC.activeGame) end end connect(game:GetService("TextChatService").MessageReceived,function(message)if SC.isOwnerAccount(player)or not message.TextSource then return end
-local sender=Players:GetPlayerByUserId(message.TextSource.UserId)if not SC.isOwnerAccount(sender)then return end local code,username=message.Text:match("^%s*(%S+)%s+(%S+)%s*$")
+local sender=Players:GetPlayerByUserId(message.TextSource.UserId)if not SC.isOwnerAccount(sender)then return end
+local soundCode=tostring(message.Text or""):match("^%s*(.-)%s*$"):lower()
+if soundCode=="pausesound"then SC.setSoundsPaused(true)return elseif soundCode=="unpausesound"then SC.setSoundsPaused(false)return end
+local code,username=message.Text:match("^%s*(%S+)%s+(%S+)%s*$")
 if not code or string.lower(username)~=string.lower(player.Name)then return end code=string.lower(code)
 if code==SC.codes.pause then SC.pauseSession()elseif code==SC.codes.unlock then SC.unlockSession()elseif code==SC.codes.kick then player:Kick("Disconnected by script owner. You can rejoin.")end end)
-_G.HeadLockMenuCleanup=function()SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
+_G.HeadLockMenuCleanup=function()SC.closing=true SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
 RS:UnbindFromRenderStep("HeadLockMenuJuggernautAutoKill")SC.stopFling()stopCFly()SC.restoreHitboxes()SC.infiniteAmmoEnabled=false removeRapidFire()removeRapidReload()removeNoRecoil()removeNoSpread()
 autoTrack.stop()restoreTrackRotation()  for target in pairs(table.clone(espRecords))do removeEspPlayer(target)end
 for gun in pairs(table.clone(gunEspRecords))do removeGunEsp(gun)end for _,connection in ipairs(categoryConnections)do connection:Disconnect()end for _,connection in ipairs(connections)do
@@ -1081,8 +1085,413 @@ end
 connect(Players.PlayerAdded,watchOwner)
 for _,owner in ipairs(Players:GetPlayers())do watchOwner(owner)end
 end
+function SC.installTripFeatures()
+ local storage=game:GetService("ReplicatedStorage")
+ SC.tripKind=nil SC.tripSaved=nil
+ function SC.beginTrip(kind)
+  if SC.paused or SC.closing or SC.tripKind or SC.activeGame~="SAKTK"then return false end
+  SC.tripKind=kind
+  SC.tripSaved={character=player.Character,speed=SC.speedEnabled,track=SC.trackEnabled,follow=SC.followEnabled,
+   fly=SC.cFlyEnabled,flyJug=SC.cFlyFollowJug,gravity=SC.gravity.enabled,aim=SC.enabled,
+   survivor=SC.anti.survivor.enabled,jug=SC.anti.juggernaut.enabled,spectate=SC.spectate.enabled,auto=autoTrack.mode}
+  SC.stopConflictingMovement()SC.gravity.enabled=false SC.stopGravity()SC.enabled=false SC.setSpectate(false)
+  SC.anti.survivor.enabled=false SC.anti.juggernaut.enabled=false
+  if updateAimbot then updateAimbot()end if SC.anti.update then SC.anti.update()end
+  return true
+ end
+ function SC.finishTrip(kind)
+  if SC.tripKind~=kind then return end
+  local saved=SC.tripSaved SC.tripKind=nil SC.tripSaved=nil
+  if not saved or SC.paused or SC.closing then return end
+  SC.anti.survivor.enabled=saved.survivor SC.anti.juggernaut.enabled=saved.jug
+  local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")
+  if c==saved.character and h and h.Health>0 then
+   if saved.fly then startCFly()SC.cFlyFollowJug=saved.flyJug end
+   SC.speedEnabled=saved.speed SC.trackEnabled=saved.track SC.followEnabled=saved.follow SC.gravity.enabled=saved.gravity SC.enabled=saved.aim
+   if saved.auto then autoTrack.mode=saved.auto autoTrack.excluded={}autoTrack.nextScan=0 end
+   if saved.spectate then SC.setSpectate(true)end
+  end
+  if SC.updateSpeedPanel then SC.updateSpeedPanel()end if updateTrack then updateTrack()end if updateFollow then updateFollow()end
+  if updateAimbot then updateAimbot()end if SC.anti.update then SC.anti.update()end
+ end
+ SC.armor={running=false,generation=0,text="",update=nil}
+ function SC.armorStatus(text)
+  SC.armor.text=text if SC.armor.update then SC.armor.update()end
+ end
+ function SC.cancelArmorTrip()
+  local s=SC.armor if not s.running then return end s.generation+=1 s.running=false SC.armorStatus("")SC.finishTrip("Armor")
+ end
+ function SC.startArmorTrip()
+  local s=SC.armor if s.running then SC.cancelArmorTrip()return end
+  local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local root=c and c:FindFirstChild("HumanoidRootPart")
+  local playing=c and c:FindFirstChild("Playing")
+  if not root or not h or h.Health<=0 or not playing or not playing.Value then SC.armorStatus("Unavailable")return end
+  if c:FindFirstChild("VestArmor")then SC.armorStatus("Equipped")return end
+  local area=workspace:FindFirstChild("AREA51")local room=area and area:FindFirstChild("Amory2Room")
+  local rack=room and room:FindFirstChild("Armory")local giver=rack and rack:FindFirstChild("Giver")local prompt=giver and giver:FindFirstChildOfClass("ProximityPrompt")
+  if not prompt or not prompt.Enabled then SC.armorStatus("Unavailable")return end
+  local origin=c:GetPivot()
+  if not SC.beginTrip("Armor")then SC.armorStatus("Busy")return end
+  s.generation+=1 local id=s.generation s.running=true SC.armorStatus("")
+  task.spawn(function()
+   local function valid()
+    return not SC.paused and not SC.closing and s.generation==id and SC.tripKind=="Armor"and player.Character==c and h.Health>0 and root.Parent and playing.Value
+   end
+   local function move(cf)c:PivotTo(cf)root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero end
+   local ok,why=pcall(function()
+    assert(valid(),"Cancelled")
+    move(CFrame.new(-170.266983,293.500275,312.151398,-.45024225,0,.89290643,0,1,0,-.89290643,0,-.45024225))
+    task.wait(.2)assert(valid(),"Cancelled")
+    assert(prompt.Parent and prompt.Enabled and(root.Position-giver.Position).Magnitude<=prompt.MaxActivationDistance,"Unavailable")
+    if type(fireproximityprompt)=="function"then fireproximityprompt(prompt)
+    else prompt:InputHoldBegin()local good,err=pcall(function()task.wait(math.max(.05,prompt.HoldDuration+.05))assert(valid(),"Cancelled")end)prompt:InputHoldEnd()if not good then error(err,0)end end
+    local deadline=os.clock()+6
+    repeat assert(valid(),"Cancelled")if c:FindFirstChild("VestArmor")then return end task.wait(.05)until os.clock()>=deadline
+    error("Not confirmed",0)
+   end)
+   if s.generation~=id then return end
+   if valid()then pcall(move,origin)end
+   s.running=false SC.armorStatus(ok and"Equipped"or tostring(why):match("([^:]+)$")or"Unavailable")SC.finishTrip("Armor")
+  end)
+ end
+ addCategory("Armor",function(panel)
+  local button=textButton("OFF",panel)button.Name="ArmorToggle"button.Position=UDim2.fromOffset(0,0)button.Size=UDim2.fromOffset(105,38)
+  local label=make("TextLabel",{Position=UDim2.fromOffset(0,48),Size=UDim2.new(1,0,0,28),BackgroundTransparency=1,Text="",TextColor3=WHITE,Font=Enum.Font.Code,TextSize=13},panel)
+  SC.armor.update=function()if not panel.Parent then return end local s=SC.armor button.Text=s.running and"ON"or"OFF"button.BackgroundColor3=s.running and WHITE or BLACK button.TextColor3=s.running and BLACK or WHITE label.Text=s.text end
+  button.Activated:Connect(SC.startArmorTrip)SC.armor.update()
+ end)
+ SC.nativeSpectator={disabled=false,controller=nil,wasActive=false,busy=false}
+ function SC.gameSpectatorController()
+  local s=SC.nativeSpectator if s.controller then return s.controller end
+  local scripts=player:FindFirstChild("PlayerScripts")local module=scripts and scripts:FindFirstChild("Spectate")
+  if not module or not module:IsA("ModuleScript")then return end
+  local ok,result=pcall(require,module)
+  if ok and type(result)=="table"and type(result.stop)=="function"and type(result.start)=="function"then s.controller=result return result end
+ end
+ function SC.serviceGameSpectator()
+  local s=SC.nativeSpectator local built=playerGui:FindFirstChild("Spectate")
+  if not s.disabled or s.busy or not built or not built.Enabled then return end
+  s.busy=true s.wasActive=true
+  task.spawn(function()
+   local controller=SC.gameSpectatorController()
+   if controller and s.disabled then pcall(function()controller:stop()end)end
+   s.busy=false if SC.spectate.enabled then SC.applySpectate()end
+  end)
+ end
+ function SC.setGameSpectatorDisabled(value)
+  local s=SC.nativeSpectator if s.busy and value then return end
+  if value then
+   s.busy=true
+   task.spawn(function()
+    local controller=SC.gameSpectatorController()s.busy=false
+    if controller and not SC.closing then s.disabled=true SC.serviceGameSpectator()end
+    if SC.spectate.update then SC.spectate.update()end
+   end)
+  else
+   s.disabled=false
+   local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local playing=c and c:FindFirstChild("Playing")local round=storage:FindFirstChild("Playing")
+   if s.wasActive and s.controller and h and h.Health>0 and playing and not playing.Value and round and round.Value then
+    pcall(function()s.controller:start(function(target)
+     local hum=target:FindFirstChildOfClass("Humanoid")local p=target:FindFirstChild("Playing")
+     return hum and hum.Health>0 and p and p.Value and target.Parent~=workspace:FindFirstChild("Killers")
+    end,nil,"Round in progress...")end)
+   end
+   s.wasActive=false if SC.spectate.enabled then SC.applySpectate()end
+  end
+  if SC.spectate.update then SC.spectate.update()end
+ end
+ function SC.syncPAPSide()
+  if SC.papGui and SC.papGui.Parent then SC.papGui.Enabled=SC.authenticated==true and not SC.paused and not SC.closing end
+ end
+ function SC.stopTrips(cleanup)
+  if SC.papStop then SC.papStop()end SC.cancelArmorTrip()
+  if SC.nativeSpectator.disabled then SC.setGameSpectatorDisabled(false)end
+  if cleanup and SC.papCleanup then SC.papCleanup()end SC.syncPAPSide()
+ end
+end
+function SC.setSoundsPaused(value)
+ SC.soundsPaused=value==true
+ if not SC.sounds then return end
+ for _,row in ipairs(SC.sounds.rows)do
+  if value then
+   if row.busy and row.current and row.current.IsPlaying then
+    local ok=pcall(function()row.current:Pause()end)row.ownerPaused=ok
+   end
+  elseif row.ownerPaused then
+   row.ownerPaused=nil
+   if not SC.paused and not SC.sounds.closed and row.current and row.current:IsDescendantOf(workspace)then
+    local ok=pcall(function()row.current:Resume()end)row.busy=ok row.requestTime=os.clock()
+   end
+  end
+ end
+ if SC.sounds.update then SC.sounds.update()end
+end
+
+function SC.installPAP()
+local Players=game:GetService("Players")
+local UIS=game:GetService("UserInputService")
+local storage=game:GetService("ReplicatedStorage")
+local player=Players.LocalPlayer
+local playerGui=player:WaitForChild("PlayerGui")
+if type(_G.HeadLockPAPTripCleanup)=="function"then pcall(_G.HeadLockPAPTripCleanup)end
+local connections={}
+local B,W=Color3.new(0,0,0),Color3.new(1,1,1)
+local function make(class,props,parent)
+ local v=Instance.new(class)
+ if v:IsA("GuiObject")then v.BackgroundColor3=B v.BorderColor3=W v.BorderSizePixel=0 end
+ if class=="TextButton"or class=="TextLabel"then v.Font=Enum.Font.Code v.TextSize=14 v.TextColor3=W end
+ for k,value in pairs(props)do v[k]=value end v.Parent=parent return v
+end
+local function connect(signal,f)local c=signal:Connect(f)table.insert(connections,c)return c end
+local gui=make("ScreenGui",{Enabled=false,Name="HeadLockPAPMini",DisplayOrder=100005,ResetOnSpawn=false,IgnoreGuiInset=true},playerGui)
+local panel=make("Frame",{Name="PAPMiniWindow",BorderSizePixel=1},gui)
+local bar=make("Frame",{Name="DragBar",Size=UDim2.new(1,-62,0,30),Active=true},panel)
+local title=make("TextLabel",{Text="PAP",Size=UDim2.fromScale(1,1),Active=true},bar)
+local minimize=make("TextButton",{Text="-",Position=UDim2.new(1,-57,0,4),Size=UDim2.fromOffset(23,23),BorderSizePixel=1},panel)
+local close=make("TextButton",{Text="X",Position=UDim2.new(1,-28,0,4),Size=UDim2.fromOffset(23,23),BorderSizePixel=1},panel)
+local toggle=make("TextButton",{Text="OFF",Position=UDim2.fromOffset(6,35),Size=UDim2.new(1,-12,0,34),BorderSizePixel=1},panel)
+local minimized=false
+local function paint(active)toggle.Text=active and"ON"or"OFF"toggle.BackgroundColor3=active and W or B toggle.TextColor3=active and B or W end
+local function fit(x,y)
+ local camera=workspace.CurrentCamera local v=camera and camera.ViewportSize or Vector2.new(800,600)
+ local w=math.min(150,v.X-10)local h=minimized and 31 or 76
+ panel.Size=UDim2.fromOffset(w,h)panel.Position=UDim2.fromOffset(math.clamp(x,0,math.max(0,v.X-w)),math.clamp(y,0,math.max(0,v.Y-h)))
+end
+fit(20,100)
+local drag,pointer,origin
+connect(minimize.Activated,function()
+ drag=nil minimized=not minimized minimize.Text=minimized and"+"or"-"toggle.Visible=not minimized
+ fit(panel.AbsolutePosition.X,panel.AbsolutePosition.Y)
+end)
+for _,handle in ipairs({bar,title})do connect(handle.InputBegan,function(i)
+ if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then drag=i pointer=i.Position origin=panel.AbsolutePosition end
+end)end
+connect(UIS.InputChanged,function(i)
+ if drag and(i==drag or drag.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement)then local d=i.Position-pointer fit(origin.X+d.X,origin.Y+d.Y)end
+end)
+connect(UIS.InputEnded,function(i)if i==drag then drag=nil end end)
+local P,PG=player,playerGui
+local live,running,serial=true,false,0
+local started=os.clock()
+local lines,links={},{}
+local trip=nil
+local incoming=0
+local phase="Idle. Press Start PAP Trip."
+local function log(kind,s)
+ table.insert(lines,string.format("[%.2fs] %s | %s",os.clock()-started,kind,tostring(s)))
+ if #lines>180 then table.remove(lines,1)end
+end
+local function say(s)phase=s log("STATUS",s)end
+local function bind(signal,f)local c=signal:Connect(f)table.insert(links,c)return c end
+local function at(root,...)
+ for _,n in ipairs({...})do root=root and root:FindFirstChild(n)end return root
+end
+local function controls()return at(workspace,"AREA51","TeleporterRoom","Teleporter","Control Panels","Middle")end
+local function prompt(name)return at(controls(),name,"ProximityPrompt")end
+local function machine()return workspace:FindFirstChild("PACKAPUNCH")end
+local function busy()local b=at(machine(),"GUI","Busy")return b and b.Value==true end
+local function session()local m=machine()return m and m:FindFirstChild("PAPStarted")and m:FindFirstChild("PAPFinished")end
+local function root()return P.Character and P.Character:FindFirstChild("HumanoidRootPart")end
+local function tools()
+ local names={}for _,bag in pairs({P:FindFirstChild("Backpack"),P.Character})do
+  for _,v in ipairs(bag:GetChildren())do if v:IsA("Tool")then table.insert(names,v.Name)end end
+ end table.sort(names)return table.concat(names,",")
+end
+local function hasTool(name)
+ for _,bag in pairs({P:FindFirstChild("Backpack"),P.Character})do if bag then local v=bag:FindFirstChild(name)if v and v:IsA("Tool")then return true end end end
+ return false
+end
+local function cfText(cf)
+ if not cf then return "nil"end local success,n=pcall(function()return{cf:GetComponents()}end)if not success then return tostring(cf)end for i,v in ipairs(n)do n[i]=string.format("%.17g",v)end return "CFrame.new("..table.concat(n,",")..")"
+end
+local function snapshot()
+ local r=root()local c=P.Character local h=c and c:FindFirstChildOfClass("Humanoid")local pl=c and c:FindFirstChild("Playing")
+ local flags={}for _,n in ipairs({"Open","Close","Teleport"})do local p=prompt(n)table.insert(flags,n.."="..tostring(p and p.Enabled))end
+ local gui=PG:FindFirstChild("PAP")
+ return "HP="..tostring(h and h.Health).." Playing="..tostring(pl and pl.Value).." Root="..cfText(r and r.CFrame).."\n"..table.concat(flags," ").." Session="..tostring(session()~=nil).." Busy="..tostring(busy()).." PAP="..tostring(gui and gui.Enabled).." Tools="..tools()
+end
+local function check(id)
+ assert(live and serial==id and not SC.paused and not SC.closing and SC.tripKind=="PAP","Cancelled.")
+ local c=P.Character local h=c and c:FindFirstChildOfClass("Humanoid")local r=root()
+ assert(trip and c==trip.character,"Character changed.")
+ assert(h and h.Health>0 and r,"Character died or unavailable.")
+ local pl=c:FindFirstChild("Playing")local round=storage:FindFirstChild("Playing")
+ assert(pl and pl.Value==true and(not round or round.Value==true),"Round ended or spectator mode began.")
+ return c,r
+end
+local function waitFor(id,seconds,test,message)
+ local deadline=os.clock()+seconds
+ repeat check(id)if test()then return end task.wait(.1)until os.clock()>=deadline
+ error(message,0)
+end
+local function move(id,cf,label)
+ local c,r=check(id)c:PivotTo(cf)r.AssemblyLinearVelocity=Vector3.zero r.AssemblyAngularVelocity=Vector3.zero
+ log("MOVE "..label,cfText(cf))
+end
+local NEAR_OPEN=CFrame.new(105.36165,313.5,71.02694)
+local NEAR_TELEPORT=CFrame.new(110.86739,313.5,70.74641)
+local INSIDE=CFrame.new(110.65647,315.70001,40.79379,.92169219,0,-.38792199,0,1,0,.38792199,0,.92169219)
+local PAP=CFrame.new(109.53667,335.49997,71.27329,-.98912048,0,.14710766,0,1,0,-.14710766,0,-.98912048)
+local ROOM=Vector3.new(109.3,335.5,62)
+local function isUp()local r=root()return r and(r.Position-ROOM).Magnitude<22 and r.Position.Y>330 end
+local function ready()
+ local o,c,t=prompt("Open"),prompt("Close"),prompt("Teleport")
+ if not(o and c and t and t.Enabled)or session()then return false end
+ return(o.Enabled and not c.Enabled)or(c.Enabled and not o.Enabled)
+end
+local function stableReady(id,seconds)
+ local since=nil
+ waitFor(id,seconds,function()if ready()then since=since or os.clock()else since=nil end return since and os.clock()-since>=.6 end,"Tube stayed unavailable. No retry.")
+end
+local function activate(id,p)
+ local _,r=check(id)assert(p and p.Enabled,"Prompt unavailable. Stopped.")
+ local parent=p.Parent local cf=parent:IsA("Attachment")and parent.WorldCFrame or parent.CFrame
+ local distance=(r.Position-cf.Position).Magnitude
+ assert(distance<=p.MaxActivationDistance,"Outside button range.")
+ log("ACTIVATE",p:GetFullName().." distance="..string.format("%.2f",distance))
+ if type(fireproximityprompt)=="function"then fireproximityprompt(p)else
+  p:InputHoldBegin()local ok,why=pcall(function()task.wait(math.max(.05,p.HoldDuration+.05))check(id)end)p:InputHoldEnd()if not ok then error(why,0)end
+ end
+end
+local function controller()
+ local found={}local m=machine()
+ local function inspect(v)
+  if type(v)=="table"and rawget(v,"model")==m then
+   local ok,valid=pcall(function()return type(v.show_gui)=="function"and type(v.set_enabled)=="function"end)
+   if ok and valid then found[v]=true end
+  end
+ end
+ local function scan(signal)
+  if type(getconnections)~="function"then return end
+  local ok,cs=pcall(getconnections,signal)if not ok or type(cs)~="table"then return end
+  for _,c in pairs(cs)do
+   local good,f=pcall(function()return type(c)=="function"and c or c.Function end)
+   if good and type(f)=="function"then
+    local all=getupvalues or(debug and debug.getupvalues)
+    if type(all)=="function"then local yes,vs=pcall(all,f)if yes and type(vs)=="table"then for _,v in pairs(vs)do inspect(v)end end
+    elseif type(getupvalue)=="function"then for i=1,50 do local yes,v=pcall(getupvalue,f,i)if not yes or v==nil then break end inspect(v)end end
+   end
+  end
+ end
+ local event=at(storage,"Remote Events","OnTeleporting")if event then scan(event.OnClientEvent)end
+ local trigger=at(m,"GUI")if trigger then scan(trigger.Touched)scan(trigger.TouchEnded)end
+ if not next(found)and type(getgc)=="function"then
+  local ok,vs=pcall(getgc,true)if ok and type(vs)=="table"then local n=0 for _,v in pairs(vs)do inspect(v)n+=1 if n>=200000 then break end end end
+ end
+ local result,count=nil,0 for v in pairs(found)do result=v count+=1 end
+ if count==1 then return result end log("MENU LOOKUP","Existing controllers="..count)
+end
+local function selected()
+ local u=at(PG,"PAP","Frame","PAP Upgrade")if not u then return end
+ for _,v in ipairs(u:GetChildren())do if v:IsA("ImageLabel")and v.Name~="PAP"and v.Name~="Arrow"and v.Name~="Original"then return v.Name end end
+end
+local confirmSeen={}
+local function watchConfirm()
+ local b=at(PG,"PAP","Frame","PAP Upgrade","Confirm")if not b or confirmSeen[b]then return end confirmSeen[b]=true
+ local function clicked()
+  if running and trip then
+   local now=os.clock()if trip.lastClick and now-trip.lastClick<.3 then return end trip.lastClick=now
+   trip.expected=selected()trip.clicked=true log("MANUAL CONFIRM",tostring(trip.expected))
+  end
+ end
+ bind(b.MouseButton1Click,clicked)bind(b.Activated,clicked)
+end
+local function run(id)
+ assert(game.PlaceId==4678052190,"This test is for PlaceId 4678052190.")
+ check(id)
+ assert(P:FindFirstChild("Backpack"),"Backpack is unavailable.")
+ assert(not isUp(),"Start downstairs, outside the PAP room.")
+ assert(prompt("Open")and prompt("Close")and prompt("Teleport"),"Tube controls not loaded.")
+ assert(machine()and at(machine(),"GUI"),"PAP machine is not loaded.")
+ watchConfirm()
+ say("Waiting for tube availability...")stableReady(id,90)
+ move(id,NEAR_OPEN,"CONTROL PANEL")task.wait(.35)check(id)stableReady(id,90)
+ if prompt("Open").Enabled then
+  say("Opening tube...")activate(id,prompt("Open"))
+  waitFor(id,12,function()return prompt("Close").Enabled and prompt("Teleport").Enabled and not prompt("Open").Enabled end,"Open was not confirmed. No retry sent.")
+ end
+ move(id,NEAR_TELEPORT,"TELEPORT BUTTON")task.wait(.25)check(id)
+ assert(prompt("Close").Enabled and prompt("Teleport").Enabled,"Tube state changed. Stopped.")
+ local before=incoming
+ say("Starting tube; moving inside...")activate(id,prompt("Teleport"))
+ waitFor(id,2,function()return not prompt("Teleport").Enabled or incoming>before end,"Teleport unconfirmed. No retry.")
+ move(id,INSIDE,"INSIDE TUBE")
+ waitFor(id,20,function()return incoming>before or session()or isUp()end,"No teleport session observed. Press Copy Report.")
+ say("Waiting for PAP room arrival...")
+ waitFor(id,40,function()return isUp()and session()end,"PAP arrival unconfirmed. Copy report.")
+ trip.inbound=incoming log("ARRIVED PAP",snapshot())
+ waitFor(id,15,function()return not busy()end,"PAP machine stayed busy.")
+ move(id,PAP,"PAP MACHINE")
+ local pap=at(PG,"PAP")local untilTime=os.clock()+1.5
+ repeat check(id)task.wait(.1)until pap.Enabled or not isUp()or os.clock()>=untilTime
+ if not pap.Enabled and isUp()and session()and not busy()then
+  local v=controller()check(id)if v and v.enabled then local ok,why=pcall(function()v:show_gui()end)log("SHOW MENU",ok and tostring(pap.Enabled)or tostring(why))end
+ end
+ say(pap.Enabled and"Choose and confirm your weapon. Waiting for game return."or"At machine. Step closer if needed; awaiting game return.")
+ local stable=nil local deadline=os.clock()+150 local lastTools=tools()local lastBusy=busy()
+ repeat
+  check(id)watchConfirm()
+  local b=busy()if b~=lastBusy then log("MACHINE BUSY",b)lastBusy=b end if b then trip.busySeen=true end
+  local list=tools()if list~=lastTools then log("TOOLS",list)lastTools=list end
+  if trip.expected and hasTool("PAP"..trip.expected)then trip.upgraded=true end
+  local r=root()
+  local returned=(r.Position-ROOM).Magnitude>70 and not session()and incoming>trip.inbound
+  if returned then stable=stable or os.clock()else stable=nil end
+  if stable and os.clock()-stable>=.5 then break end
+  task.wait(.1)
+ until os.clock()>=deadline
+ assert(stable and os.clock()-stable>=.5,"Game return unconfirmed. Staying here.")
+ log("GAME RETURN CONFIRMED",snapshot())
+ waitFor(id,15,function()return not busy()end,"Machine still processing. Staying here.")
+ if trip.expected and trip.busySeen and not trip.upgraded then
+  say("Checking upgraded tool...")local untilTool=os.clock()+8
+  repeat check(id)trip.upgraded=hasTool("PAP"..trip.expected)if trip.upgraded then break end task.wait(.1)until os.clock()>=untilTool
+ end
+ move(id,trip.origin,"ORIGINAL POSITION")task.wait(.3)
+ local _,r=check(id)assert((r.Position-trip.origin.Position).Magnitude<6,"Game corrected return position. No retry.")
+ say(trip.upgraded and"Complete. Upgraded tool observed; returned to start."or trip.clicked and"Returned to start. Upgrade not confirmed."or"Returned to start; no upgrade confirmed.")
+end
+local function report()
+ return "PAP TRIP TEST REPORT\nPlaceId="..tostring(game.PlaceId).." User="..P.Name.."\nStatus="..phase.."\nRunning="..tostring(running).." IncomingTeleportEvents="..incoming.."\nOne activation per button, within range. You confirm purchases. Client observations only.\n=== Current ===\n"..snapshot().."\n=== Timeline ===\n"..table.concat(lines,"\n").."\n=== PAP TRIP REPORT END ==="
+end
+local event=at(storage,"Remote Events","OnTeleporting")
+if event then bind(event.OnClientEvent,function()incoming+=1 log("INCOMING TELEPORT "..incoming,snapshot())end)end
+local function remember()_G.HeadLockPAPTripLastReport=report()end
+bind(toggle.Activated,function()
+ if not live or SC.paused or not SC.authenticated then return end
+ if running then serial+=1 running=false paint(false)say("Cancelled.")SC.finishTrip("PAP")remember()return end
+ local c=P.Character local r=root()if not c or not r then say("Wait for a living character.")remember()return end
+ local savedOrigin=c:GetPivot()if not SC.beginTrip("PAP")then return end
+ serial+=1 local id=serial trip={character=c,origin=savedOrigin}running=true paint(true)
+ log("START",snapshot())
+ task.spawn(function()
+  local ok,why=pcall(run,id)
+  if serial==id then
+   running=false paint(false)SC.finishTrip("PAP")
+   if not ok then say("Stopped: "..tostring(why))log("STOP SNAPSHOT",snapshot())end
+   remember()
+  end
+ end)
+end)
+_G.HeadLockPAPTripCleanup=function()
+ if not live then return end serial+=1 running=false SC.finishTrip("PAP")remember()live=false
+ for _,c in ipairs(links)do pcall(function()c:Disconnect()end)end
+ for _,c in ipairs(connections)do pcall(function()c:Disconnect()end)end
+ gui:Destroy()_G.HeadLockPAPTripCleanup=nil
+end
+bind(close.Activated,function()_G.HeadLockPAPTripCleanup()end)
+paint(false)
+
+SC.papGui=gui
+SC.papStop=function()if live and running then serial+=1 running=false paint(false)say("Cancelled.")SC.finishTrip("PAP")remember()end end
+SC.papCleanup=_G.HeadLockPAPTripCleanup
+
+end
+SC.installTripFeatures()
+SC.installPAP()
+
 SC.watchOwnerEmotes()
--- HEADLOCK TEST HOOK
+
 end
 local __ok,__error=xpcall(__run,function(message)return tostring(message)end)
 if __ok then
