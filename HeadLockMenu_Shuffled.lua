@@ -284,7 +284,7 @@ nearest,nearestDistance=candidate,distance end end end end end if nearest then a
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
 button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section})local function selectCategory()
 selectedCategories[section]=selectCategory for _,oldButton in ipairs(categoryButtons)do oldButton.BackgroundColor3=BLACK oldButton.TextColor3=WHITE end button.BackgroundColor3=WHITE
-button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
+button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.fling then SC.fling.update=nil SC.fling.refresh=nil end if SC.pap then SC.pap.update=nil end if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
         for _,connection in ipairs(categoryConnections)do connection:Disconnect()end table.clear(categoryConnections)
 for _,child in ipairs(content:GetChildren())do child:Destroy()end draw(content)end connect(button.Activated,selectCategory)return selectCategory end
 SC.selectAimbot=addCategory("Aimbot",function(panel)make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Aimbot",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,
@@ -349,34 +349,210 @@ startCFly()end update()end)mobileMode.Activated:Connect(function()SC.cFlyCameraM
 if not SC.cFlyFollowJug and SC.isOwnerAccount(juggernautPlayer)then SC.cFlyNotice="nuh uh you cant kill me"update()return end
 if not SC.cFlyEnabled then followJug.Text="C-Fly required"return end if not SC.cFlyFollowJug then local target=juggernautPlayer local model=target and target.Character
 local humanoid=model and model:FindFirstChildOfClass("Humanoid")if target==player or not model or model.Parent~=workspace:FindFirstChild("Killers")or not humanoid or humanoid.Health<=0
-or not model:FindFirstChild("HumanoidRootPart")then followJug.Text="Jug unavailable"return end end SC.cFlyNotice=""SC.cFlyFollowJug=not SC.cFlyFollowJug update()end)update()end)function SC.stopFling()
-local state=SC.fling if not state.active then return end state.active=false local root=state.root if root and root.Parent then root.AssemblyLinearVelocity=Vector3.zero
-root.AssemblyAngularVelocity=Vector3.zero if state.home and state.character and state.character.Parent and state.character:FindFirstChildOfClass("Humanoid")
-and state.character:FindFirstChildOfClass("Humanoid").Health>0 then state.character:PivotTo(state.home)end root.CanCollide=state.canCollide root.CollisionGroup=state.collisionGroup end state.root=nil
-state.character=nil state.home=nil if state.status then state.status.Text="Ready"end end function SC.startFling()local state=SC.fling if state.active or SC.paused or SC.tripKind then return end
-updateJuggernaut()if SC.isOwnerAccount(juggernautPlayer)then if state.status and state.status.Parent then state.status.Text="nuh uh you cant kill me"end return end
-if SC.stopJuggernautAutoKill then SC.stopJuggernautAutoKill()end local target=juggernautPlayer and juggernautPlayer.Character
-local targetRoot=target and target:FindFirstChild("HumanoidRootPart")local targetHumanoid=target and target:FindFirstChildOfClass("Humanoid")local character=player.Character
-local root=character and character:FindFirstChild("HumanoidRootPart")local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-if not targetRoot or not targetHumanoid or targetHumanoid.Health<=0 or not root or not humanoid or humanoid.Health<=0 then if state.status then state.status.Text="No live Juggernaut"end return end
-if SC.cFlyEnabled then stopCFly()end SC.trackEnabled=false SC.followEnabled=false autoTrack.stop()restoreTrackRotation()state.active=true state.generation=(state.generation or 0)+1
-local generation=state.generation state.root=root state.character=character state.home=character:GetPivot()state.canCollide=root.CanCollide state.collisionGroup=root.CollisionGroup
-if state.status then state.status.Text="Flinging..."end task.spawn(function()local ok,flingError=pcall(function()local camera=workspace.CurrentCamera
-local look=camera and camera.CFrame.LookVector or root.CFrame.LookVector local defaultDirection=Vector3.new(look.X,0,look.Z)defaultDirection=defaultDirection.Magnitude>0.01
-and defaultDirection.Unit or Vector3.new(0,0,-1)local floorParams=RaycastParams.new()floorParams.FilterType=Enum.RaycastFilterType.Exclude floorParams.FilterDescendantsInstances={character,target}
-root.CollisionGroup="Default"root.CanCollide=true local initialHealth=humanoid.Health local startingPosition=targetRoot.Position local endTime=os.clock()+1.15
-while state.active and state.generation==generation and os.clock()<endTime and root.Parent and targetRoot.Parent and targetHumanoid.Health>0 and humanoid.Health>math.max(0,initialHealth-10)do
-local velocity=targetRoot.AssemblyLinearVelocity local planarVelocity=Vector3.new(velocity.X,0,velocity.Z)local moving=planarVelocity.Magnitude>3
-local direction=moving and planarVelocity.Unit or defaultDirection local lead=moving and direction*math.min(planarVelocity.Magnitude*0.03,0.65)or Vector3.zero
-local targetPosition=targetRoot.Position+lead local floor=workspace:Raycast(targetPosition+Vector3.new(0,4,0),Vector3.new(0,-12,0),floorParams)local safeY=math.max(targetPosition.Y+1.6,
-floor and floor.Position.Y+4 or targetPosition.Y+1.6)local center=Vector3.new(targetPosition.X,safeY,targetPosition.Z)local distanceBehind=moving and 1.1 or 0.35
-character:PivotTo(CFrame.lookAt(center-direction*distanceBehind,center+direction))root.AssemblyAngularVelocity=Vector3.new(0,400,0)root.AssemblyLinearVelocity=direction*450+planarVelocity
-if(targetRoot.Position-startingPosition).Magnitude>35 or targetRoot.AssemblyLinearVelocity.Magnitude>160 then break end RS.Heartbeat:Wait()end end)if state.generation==generation then SC.stopFling()
-if not ok then warn("HeadLockMenu Fling: "..tostring(flingError))if state.status then state.status.Text="Fling error (console)"end end end end)end connect(player.CharacterRemoving,SC.stopFling)
-SC.codes={pause="pause",unlock="unpause",kick="kick",}addCategory("Fling",function(panel)make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Fling Juggernaut",
-TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)local button=textButton("FLING",panel)button.Position=UDim2.fromOffset(0,40)
-button.Size=UDim2.new(1,0,0,38)connect(button.Activated,SC.startFling)SC.fling.status=make("TextLabel",{Position=UDim2.fromOffset(0,88),Size=UDim2.new(1,0,0,44),BackgroundTransparency=1,Text="Ready",
-TextColor3=WHITE,TextSize=14,TextWrapped=true,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)make("TextLabel",{Position=UDim2.fromOffset(0,140),Size=UDim2.new(1,0,0,32),BackgroundTransparency=1,Text="This might not work all the time.",TextColor3=WHITE,TextSize=11,TextWrapped=true,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)end)function SC.stopJuggernautAutoKill()local s=SC.juggernautAutoKill if not s.enabled then return end
+or not model:FindFirstChild("HumanoidRootPart")then followJug.Text="Jug unavailable"return end end SC.cFlyNotice=""SC.cFlyFollowJug=not SC.cFlyFollowJug update()end)update()end)function SC.installFling()
+ local s=SC.fling
+ s.selected={}s.generation=0 s.listOpen=false s.mode=nil s.message=""
+ local function paint()if s.update then s.update()end end
+ local function targets()
+  local list={}
+  for target in pairs(s.selected)do
+   if SC.canSelectPlayer(target)then table.insert(list,target)else s.selected[target]=nil end
+  end
+  table.sort(list,function(a,b)return a.Name:lower()<b.Name:lower()end)
+  return list
+ end
+ local function living(target)
+  if not SC.canSelectPlayer(target)then return end
+  local c=target.Character local h=c and c:FindFirstChildOfClass("Humanoid")
+  local r=h and(h.RootPart or c:FindFirstChild("HumanoidRootPart"))
+  if c and c.Parent and h and h.Health>0 then return c,h,r end
+ end
+ local function zero(c)
+  for _,part in ipairs(c:GetChildren())do if part:IsA("BasePart")then
+   part.Velocity=Vector3.zero part.RotVelocity=Vector3.zero
+   part.AssemblyLinearVelocity=Vector3.zero part.AssemblyAngularVelocity=Vector3.zero
+  end end
+ end
+ local function place(pass,cf)
+  pass.root.CFrame=cf
+  if pass.character.PrimaryPart then pass.character:SetPrimaryPartCFrame(cf)
+  else pass.character:PivotTo(cf*pass.offset)end
+ end
+ local function release(pass,returnHome)
+  if not pass or pass.released then return end pass.released=true
+  if pass.force then pcall(function()pass.force:Destroy()end)end
+  pcall(function()workspace.FallenPartsDestroyHeight=pass.height end)
+  pcall(function()pass.humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated,pass.seated)end)
+  local camera=workspace.CurrentCamera
+  if camera and(camera.CameraSubject==pass.subject or camera.CameraSubject==pass.humanoid)then
+   camera.CameraSubject=pass.cameraSubject or pass.humanoid
+  end
+  if player.Character==pass.character and pass.character.Parent and pass.root.Parent and pass.humanoid.Health>0 then
+   if returnHome then pcall(function()place(pass,pass.home*CFrame.new(0,.5,0))pass.humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)end)end
+   zero(pass.character)
+  end
+  if s.pass==pass then s.pass=nil end
+ end
+ function SC.stopFling()
+  s.active=false s.mode=nil s.generation+=1
+  release(s.pass,true)s.character=nil s.message=""paint()
+ end
+ local function valid(id,c,h,r,target,targetCharacter,targetHumanoid)
+  if not s.active or s.generation~=id or SC.paused or SC.closing or SC.tripKind or SC.activeGame~="SAKTK"then return false end
+  if player.Character~=c or not c.Parent or not r.Parent or h.Health<=0 then return false end
+  if SC.cFlyEnabled or SC.speedEnabled or SC.trackEnabled or SC.followEnabled or SC.juggernautAutoKill.enabled then return false end
+  if not SC.canSelectPlayer(target)or target.Character~=targetCharacter or not targetCharacter.Parent or targetHumanoid.Health<=0 then return false end
+  if s.mode=="Juggernaut"then updateJuggernaut()return juggernautPlayer==target end
+  return s.selected[target]==true
+ end
+ local function fling(target,id)
+  local tc,th,tr=living(target)if not tc or th.Sit then return end
+  local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")
+  local r=h and(h.RootPart or c:FindFirstChild("HumanoidRootPart"))
+  if not c or not h or h.Health<=0 or not r then return end
+  local head=tc:FindFirstChild("Head")local accessory=tc:FindFirstChildOfClass("Accessory")
+  local handle=accessory and accessory:FindFirstChild("Handle")local part=tr or head or handle
+  if not part or not part:IsA("BasePart")or not valid(id,c,h,r,target,tc,th)then return end
+  local camera=workspace.CurrentCamera
+  local pass={character=c,humanoid=h,root=r,home=r.CFrame,offset=r.CFrame:ToObjectSpace(c:GetPivot()),
+   height=workspace.FallenPartsDestroyHeight,seated=h:GetStateEnabled(Enum.HumanoidStateType.Seated),cameraSubject=camera and camera.CameraSubject,subject=head or handle or th}
+  s.pass=pass
+  local function allowed()return not pass.released and part.Parent and valid(id,c,h,r,target,tc,th)end
+  local function fpos(pos,angle)
+   if not allowed()then return false end
+   place(pass,CFrame.new(part.Position)*pos*angle)
+   r.Velocity=Vector3.new(9e7,9e7*10,9e7)r.RotVelocity=Vector3.new(9e8,9e8,9e8)
+   task.wait()return allowed()
+  end
+  local ok,why=pcall(function()
+   if camera then camera.CameraSubject=pass.subject end
+   workspace.FallenPartsDestroyHeight=0/0
+   pass.force=Instance.new("BodyVelocity")pass.force.Parent=r
+   pass.force.Velocity=Vector3.zero pass.force.MaxForce=Vector3.new(9e9,9e9,9e9)
+   h:SetStateEnabled(Enum.HumanoidStateType.Seated,false)
+   local started=os.clock()local angle=0
+   repeat
+    if not allowed()then break end
+    if part.Velocity.Magnitude<50 then
+     angle+=100 local spin=CFrame.Angles(math.rad(angle),0,0)
+     if not fpos(CFrame.new(0,1.5,0)+th.MoveDirection*part.Velocity.Magnitude/1.25,spin)then break end
+     if not fpos(CFrame.new(0,-1.5,0)+th.MoveDirection*part.Velocity.Magnitude/1.25,spin)then break end
+     if not fpos(CFrame.new(0,1.5,0)+th.MoveDirection*part.Velocity.Magnitude/1.25,spin)then break end
+     if not fpos(CFrame.new(0,-1.5,0)+th.MoveDirection*part.Velocity.Magnitude/1.25,spin)then break end
+     if not fpos(CFrame.new(0,1.5,0)+th.MoveDirection,spin)then break end
+     if not fpos(CFrame.new(0,-1.5,0)+th.MoveDirection,spin)then break end
+    else
+     local quarter=CFrame.Angles(math.rad(90),0,0)local flat=CFrame.Angles(0,0,0)
+     if not fpos(CFrame.new(0,1.5,th.WalkSpeed),quarter)then break end
+     if not fpos(CFrame.new(0,-1.5,-th.WalkSpeed),flat)then break end
+     if not fpos(CFrame.new(0,1.5,th.WalkSpeed),quarter)then break end
+     if not fpos(CFrame.new(0,-1.5,0),quarter)then break end
+     if not fpos(CFrame.new(0,-1.5,0),flat)then break end
+     if not fpos(CFrame.new(0,-1.5,0),quarter)then break end
+     if not fpos(CFrame.new(0,-1.5,0),flat)then break end
+    end
+   until started+2<os.clock()
+  end)
+  if not pass.released then
+   if pass.force then pass.force:Destroy()pass.force=nil end
+   h:SetStateEnabled(Enum.HumanoidStateType.Seated,pass.seated)
+   if camera and camera.CameraSubject==pass.subject then camera.CameraSubject=h end
+   if s.generation==id and player.Character==c and c.Parent and r.Parent and h.Health>0 then
+    local deadline=os.clock()+1
+    repeat
+     if s.generation~=id or pass.released or player.Character~=c or h.Health<=0 then break end
+     place(pass,pass.home*CFrame.new(0,.5,0))h:ChangeState(Enum.HumanoidStateType.GettingUp)zero(c)
+     task.wait()
+    until(r.Position-pass.home.Position).Magnitude<25 or os.clock()>=deadline
+   end
+   release(pass,false)
+  end
+  if not ok then error(why,0)end
+ end
+ function SC.startFling(mode)
+  mode=mode=="Players"and"Players"or"Juggernaut"
+  if SC.paused or SC.closing or SC.tripKind or SC.activeGame~="SAKTK"then return end
+  if s.active and s.mode==mode then SC.stopFling()return end
+  if mode=="Juggernaut"then
+   updateJuggernaut()
+   if SC.isOwnerAccount(juggernautPlayer)then s.message="nuh uh you cant kill me"paint()return end
+   if not living(juggernautPlayer)then s.message="Jug unavailable"paint()return end
+  elseif #targets()==0 then s.message="Select players"s.listOpen=true paint()return end
+  local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")
+  if not c or not h or h.Health<=0 or not c:FindFirstChild("HumanoidRootPart")then s.message="Unavailable"paint()return end
+  SC.stopConflictingMovement()
+  s.active=true s.mode=mode s.character=c s.message=""s.generation+=1 local id=s.generation paint()
+  task.spawn(function()
+   local ok,why=pcall(function()
+    while s.active and s.generation==id do
+     if SC.paused or SC.closing or SC.tripKind or SC.activeGame~="SAKTK"or player.Character~=c or h.Health<=0 or not c.Parent
+      or SC.cFlyEnabled or SC.speedEnabled or SC.trackEnabled or SC.followEnabled or SC.juggernautAutoKill.enabled then break end
+     local list
+     if s.mode=="Juggernaut"then updateJuggernaut()list={}
+      if SC.canSelectPlayer(juggernautPlayer)then table.insert(list,juggernautPlayer)end
+     else list=targets()if #list==0 then break end end
+     for _,target in ipairs(list)do
+      if not s.active or s.generation~=id then break end
+      fling(target,id)if not s.active or s.generation~=id then break end task.wait(.1)
+     end
+     paint()task.wait(.5)
+    end
+   end)
+   if s.generation==id then SC.stopFling()if not ok then s.message="Fling error"paint()warn("HeadLockMenu Fling: "..tostring(why))end end
+  end)
+ end
+ connect(player.CharacterRemoving,SC.stopFling)
+ connect(Players.PlayerAdded,function()if s.refresh then s.refresh()end end)
+ connect(Players.PlayerRemoving,function(target)
+  s.selected[target]=nil
+  if s.pass and s.pass.subject and target.Character and s.pass.subject:IsDescendantOf(target.Character)then release(s.pass,true)end
+  if s.refresh then s.refresh(target)end paint()
+ end)
+ addCategory("Fling",function(panel)
+  local jug=textButton("Fling Juggernaut",panel)jug.Name="FlingJuggernaut"jug.Size=UDim2.new(1,0,0,38)
+  local start=textButton("Fling (0)",panel)start.Name="FlingSelected"start.Position=UDim2.fromOffset(0,46)start.Size=UDim2.new(1,0,0,38)
+  local names=textButton("Players",panel)names.Name="FlingPlayers"names.Position=UDim2.fromOffset(0,92)names.Size=UDim2.new(1,0,0,38)
+  local list=make("ScrollingFrame",{Name="FlingPlayerList",Position=UDim2.fromOffset(0,138),Size=UDim2.new(1,0,1,-164),
+   BackgroundColor3=BLACK,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.fromOffset(0,0),Visible=s.listOpen},panel)
+  local rowTargets={}
+  local layout=make("UIListLayout",{Padding=UDim.new(0,3),SortOrder=Enum.SortOrder.Name},list)
+  layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()list.CanvasSize=UDim2.fromOffset(0,layout.AbsoluteContentSize.Y+4)end)
+  local status=make("TextLabel",{Name="FlingStatus",Position=UDim2.new(0,0,1,-22),Size=UDim2.new(1,0,0,22),
+   BackgroundTransparency=1,Text="",TextColor3=WHITE,TextSize=11,Font=Enum.Font.Code,TextTruncate=Enum.TextTruncate.AtEnd},panel)
+  s.update=function()
+   local count=#targets()
+   jug.Text=s.active and s.mode=="Juggernaut"and"Fling Juggernaut: ON"or"Fling Juggernaut"
+   start.Text="Fling ("..count..")"..(s.active and s.mode=="Players"and": ON"or"")
+   for _,pair in ipairs({{jug,"Juggernaut"},{start,"Players"}})do
+    local on=s.active and s.mode==pair[2]pair[1].BackgroundColor3=on and WHITE or BLACK pair[1].TextColor3=on and BLACK or WHITE
+   end
+   names.Text=s.listOpen and"Players ▴"or"Players ▾"list.Visible=s.listOpen status.Text=s.message
+   for _,row in ipairs(list:GetChildren())do if row:IsA("TextButton")then
+    local selected=s.selected[rowTargets[row]]row.BackgroundColor3=selected and WHITE or BLACK row.TextColor3=selected and BLACK or WHITE
+   end end
+  end
+  s.refresh=function(leaving)
+   for _,row in ipairs(list:GetChildren())do if row:IsA("TextButton")then row:Destroy()end end table.clear(rowTargets)
+   local all=Players:GetPlayers()table.sort(all,function(a,b)return a.Name:lower()<b.Name:lower()end)
+   for _,target in ipairs(all)do if target~=leaving and SC.canSelectPlayer(target)then
+    local row=textButton("  "..target.Name,list)row.Name=target.Name row.Size=UDim2.new(1,-7,0,36)
+    rowTargets[row]=target row.TextXAlignment=Enum.TextXAlignment.Left row.TextTruncate=Enum.TextTruncate.AtEnd
+    row.Activated:Connect(function()
+     if not SC.canSelectPlayer(target)then return end s.selected[target]=not s.selected[target]or nil s.message=""paint()
+    end)
+    row.BackgroundColor3=s.selected[target]and WHITE or BLACK row.TextColor3=s.selected[target]and BLACK or WHITE
+   end end
+   paint()
+  end
+  jug.Activated:Connect(function()SC.startFling("Juggernaut")end)
+  start.Activated:Connect(function()SC.startFling("Players")end)
+  names.Activated:Connect(function()s.listOpen=not s.listOpen paint()end)
+  s.refresh()
+ end)
+end
+SC.installFling()
+SC.codes={pause="pause",unlock="unpause",kick="kick",}
+function SC.stopJuggernautAutoKill()local s=SC.juggernautAutoKill if not s.enabled then return end
 s.enabled=false s.target=nil local root=s.character and s.character:FindFirstChild("HumanoidRootPart")if s.humanoid and s.humanoid.Parent and s.humanoid.Health>0 then
 s.humanoid.AutoRotate=s.autoRotate if root and s.upright and s.offset then local face=s.upright.LookVector face=Vector3.new(face.X,0,face.Z)if face.Magnitude<0.01 then face=Vector3.new(0,0,-1)end
 s.character:PivotTo(CFrame.lookAt(root.Position,root.Position+face)*s.offset)root.AssemblyAngularVelocity=Vector3.zero root.AssemblyLinearVelocity=Vector3.zero end end if s.button and s.button.Parent then
@@ -1123,6 +1299,7 @@ function SC.installTripFeatures()
  end
  function SC.startArmorTrip()
   local s=SC.armor if s.running then SC.cancelArmorTrip()return end
+  if SC.fling.active then SC.stopFling()end
   local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local root=c and c:FindFirstChild("HumanoidRootPart")
   local playing=c and c:FindFirstChild("Playing")
   if not root or not h or h.Health<=0 or not playing or not playing.Value then SC.armorStatus("Unavailable")return end
@@ -1201,7 +1378,7 @@ function SC.installTripFeatures()
   if SC.spectate.update then SC.spectate.update()end
  end
  function SC.syncPAPSide()
-  if SC.papGui and SC.papGui.Parent then SC.papGui.Enabled=SC.authenticated==true and not SC.paused and not SC.closing end
+  if SC.pap and SC.pap.update then SC.pap.update()end
  end
  function SC.stopTrips(cleanup)
   if SC.papStop then SC.papStop()end SC.cancelArmorTrip()
@@ -1234,42 +1411,10 @@ local storage=game:GetService("ReplicatedStorage")
 local player=Players.LocalPlayer
 local playerGui=player:WaitForChild("PlayerGui")
 if type(_G.HeadLockPAPTripCleanup)=="function"then pcall(_G.HeadLockPAPTripCleanup)end
-local connections={}
-local B,W=Color3.new(0,0,0),Color3.new(1,1,1)
-local function make(class,props,parent)
- local v=Instance.new(class)
- if v:IsA("GuiObject")then v.BackgroundColor3=B v.BorderColor3=W v.BorderSizePixel=0 end
- if class=="TextButton"or class=="TextLabel"then v.Font=Enum.Font.Code v.TextSize=14 v.TextColor3=W end
- for k,value in pairs(props)do v[k]=value end v.Parent=parent return v
+SC.pap={active=false,closed=false,update=nil}
+local function paint(active)
+ SC.pap.active=active if SC.pap.update then SC.pap.update()end
 end
-local function connect(signal,f)local c=signal:Connect(f)table.insert(connections,c)return c end
-local gui=make("ScreenGui",{Enabled=false,Name="HeadLockPAPMini",DisplayOrder=100005,ResetOnSpawn=false,IgnoreGuiInset=true},playerGui)
-local panel=make("Frame",{Name="PAPMiniWindow",BorderSizePixel=1},gui)
-local bar=make("Frame",{Name="DragBar",Size=UDim2.new(1,-62,0,30),Active=true},panel)
-local title=make("TextLabel",{Text="PAP",Size=UDim2.fromScale(1,1),Active=true},bar)
-local minimize=make("TextButton",{Text="-",Position=UDim2.new(1,-57,0,4),Size=UDim2.fromOffset(23,23),BorderSizePixel=1},panel)
-local close=make("TextButton",{Text="X",Position=UDim2.new(1,-28,0,4),Size=UDim2.fromOffset(23,23),BorderSizePixel=1},panel)
-local toggle=make("TextButton",{Text="OFF",Position=UDim2.fromOffset(6,35),Size=UDim2.new(1,-12,0,34),BorderSizePixel=1},panel)
-local minimized=false
-local function paint(active)toggle.Text=active and"ON"or"OFF"toggle.BackgroundColor3=active and W or B toggle.TextColor3=active and B or W end
-local function fit(x,y)
- local camera=workspace.CurrentCamera local v=camera and camera.ViewportSize or Vector2.new(800,600)
- local w=math.min(150,v.X-10)local h=minimized and 31 or 76
- panel.Size=UDim2.fromOffset(w,h)panel.Position=UDim2.fromOffset(math.clamp(x,0,math.max(0,v.X-w)),math.clamp(y,0,math.max(0,v.Y-h)))
-end
-fit(20,100)
-local drag,pointer,origin
-connect(minimize.Activated,function()
- drag=nil minimized=not minimized minimize.Text=minimized and"+"or"-"toggle.Visible=not minimized
- fit(panel.AbsolutePosition.X,panel.AbsolutePosition.Y)
-end)
-for _,handle in ipairs({bar,title})do connect(handle.InputBegan,function(i)
- if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then drag=i pointer=i.Position origin=panel.AbsolutePosition end
-end)end
-connect(UIS.InputChanged,function(i)
- if drag and(i==drag or drag.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement)then local d=i.Position-pointer fit(origin.X+d.X,origin.Y+d.Y)end
-end)
-connect(UIS.InputEnded,function(i)if i==drag then drag=nil end end)
 local P,PG=player,playerGui
 local live,running,serial=true,false,0
 local started=os.clock()
@@ -1457,9 +1602,10 @@ end
 local event=at(storage,"Remote Events","OnTeleporting")
 if event then bind(event.OnClientEvent,function()incoming+=1 log("INCOMING TELEPORT "..incoming,snapshot())end)end
 local function remember()_G.HeadLockPAPTripLastReport=report()end
-bind(toggle.Activated,function()
+SC.papActivate=function()
  if not live or SC.paused or not SC.authenticated then return end
  if running then serial+=1 running=false paint(false)say("Cancelled.")SC.finishTrip("PAP")remember()return end
+ if SC.fling.active then SC.stopFling()end
  local c=P.Character local r=root()if not c or not r then say("Wait for a living character.")remember()return end
  local savedOrigin=c:GetPivot()if not SC.beginTrip("PAP")then return end
  serial+=1 local id=serial trip={character=c,origin=savedOrigin}running=true paint(true)
@@ -1472,17 +1618,21 @@ bind(toggle.Activated,function()
    remember()
   end
  end)
+end
+addCategory("PAP",function(panel)
+ local toggle=textButton("OFF",panel)toggle.Name="PAPToggle"toggle.Size=UDim2.new(1,0,0,40)
+ SC.pap.update=function()
+  local active=SC.pap.active toggle.Text=active and"ON"or"OFF"
+  toggle.BackgroundColor3=active and WHITE or BLACK toggle.TextColor3=active and BLACK or WHITE
+ end
+ toggle.Activated:Connect(SC.papActivate)SC.pap.update()
 end)
 _G.HeadLockPAPTripCleanup=function()
  if not live then return end serial+=1 running=false SC.finishTrip("PAP")remember()live=false
  for _,c in ipairs(links)do pcall(function()c:Disconnect()end)end
- for _,c in ipairs(connections)do pcall(function()c:Disconnect()end)end
- gui:Destroy()_G.HeadLockPAPTripCleanup=nil
+ SC.pap.closed=true SC.pap.update=nil _G.HeadLockPAPTripCleanup=nil
 end
-bind(close.Activated,function()_G.HeadLockPAPTripCleanup()end)
 paint(false)
-
-SC.papGui=gui
 SC.papStop=function()if live and running then serial+=1 running=false paint(false)say("Cancelled.")SC.finishTrip("PAP")remember()end end
 SC.papCleanup=_G.HeadLockPAPTripCleanup
 
