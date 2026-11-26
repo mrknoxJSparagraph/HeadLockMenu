@@ -17,6 +17,11 @@ when all are occupied. Imported model scripts are removed before parenting.
 AutoWin is hidden until an owner enables the Credits checkbox. Its flight,
 weapon overrides and survivor skip list are independent of the manual
 C Fly and weapon toggles. Local Juggernaut Auto Kill ignores that skip list.
+The separate Kill First list shuffles selected eligible players once per
+round and finishes them before other survivors. AutoWin and Follow Jug
+share the exact position function. Existing pistol controllers are located
+before firing, including cached mobile handlers when the executor supports
+connection/upvalue inspection; no manual first shot is used for discovery.
 Wall clip and Anti-Fling start OFF. The existing account restriction is a
 client menu gate, rather than a server authorization boundary.
 
