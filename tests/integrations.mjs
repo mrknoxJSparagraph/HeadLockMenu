@@ -69,7 +69,7 @@ for _,node in ipairs(T.content:GetDescendants())do if node:IsA('TextLabel')then
  assert(not node.Text:find('Rapid Fire max',1,true)and not node.Text:find('Anti-fling:',1,true)and not node.Text:find('Additional script',1,true))
 end end
 checkbox.Activated:Fire()assert(SC.ownerFeatures and category.Visible)
-E.click(T.main,'  AutoWin')assert(T.content:FindFirstChild('AutoWinToggle').Text=='OFF')
+E.click(T.main,'  AutoWin')assert(T.content:FindFirstChild('AutoWinToggle',true).Text=='OFF')
 SC.setOwnerFeatures(false)assert(not category.Visible and SC.selectedCategory=='Credits'and not SC.autoWin.enabled)
 E.localPlayer.Name='RegularUser' SC.setOwnerFeatures(true)assert(not SC.ownerFeatures and not category.Visible)
 assert(SC.setAutoWin(true)==false)
@@ -86,6 +86,7 @@ assert(aw.role=='survivor'and aw.target==E.owner and root.Anchored)
 assert(E.fireCount>=1 and E.lastSpread==0 and not E.recoils)
 assert(SC.rapidFireEnabled==false and SC.rapidFirePower==100 and SC.infiniteAmmoEnabled==false)
 assert(not SC.cFlyEnabled and not SC.cFlyFollowJug)
+assert(E.localPlayer.Character.LastPivot==E.owner.Character:FindFirstChild('HumanoidRootPart').CFrame,'AutoWin differs from Follow Jug positioning')
 assert(math.abs(T.interval(E.object,true)-.003)<.0001)
 local count=E.fireCount
 E.time+=.02;SC.stepAutoWin(false);assert(E.fireCount>count and E.object.ammo==8)
@@ -110,19 +111,138 @@ _G.HeadLockMenuCleanup()
 await run('Player selector supports multiple selections and live membership changes',`
 local E,T=TestEnv,__T local SC=T.SC
 T.selectGame();SC.setOwnerFeatures(true);E.click(T.main,'  AutoWin')
-local list=T.content:FindFirstChild('AutoWinPlayerList')assert(list and not list.Visible)
-T.content:FindFirstChild('AutoWinPlayers').Activated:Fire()assert(list.Visible)
+local list=T.content:FindFirstChild('AutoWinPlayerList',true)assert(list and not list.Visible)
+T.content:FindFirstChild('AutoWinPlayers',true).Activated:Fire()assert(list.Visible)
 list:FindFirstChild('Skip_'..E.owner.UserId).Activated:Fire()
 list:FindFirstChild('Skip_'..E.other.UserId).Activated:Fire()
 assert(SC.autoWin.skipped[E.owner.UserId]and SC.autoWin.skipped[E.other.UserId])
+local first=T.content:FindFirstChild('AutoWinKillFirstList',true)
+assert(first and not first.Visible)
+T.content:FindFirstChild('AutoWinKillFirstPlayers',true).Activated:Fire()assert(first.Visible)
+first:FindFirstChild('KillFirst_'..E.owner.UserId).Activated:Fire()
+first:FindFirstChild('KillFirst_'..E.other2.UserId).Activated:Fire()
+assert(SC.autoWin.killFirst[E.owner.UserId]and SC.autoWin.killFirst[E.other2.UserId])
+assert(SC.autoWin.skipped[E.other.UserId]and not SC.autoWin.killFirst[E.other.UserId],'the two lists share selection state')
+local scroll=T.content:FindFirstChild('AutoWinSettings')assert(scroll.CanvasSize.Y.Offset>500)
 local newcomer=E.addPlayer('NewPlayer',77,40,300)
 game.services.Players.PlayerAdded:Fire(newcomer)
 assert(list:FindFirstChild('Skip_77'))
+assert(first:FindFirstChild('KillFirst_77'))
 newcomer.Parent=nil;table.remove(E.players,table.find(E.players,newcomer))
 game.services.Players.PlayerRemoving:Fire(newcomer)
 assert(not list:FindFirstChild('Skip_77'))
+assert(not first:FindFirstChild('KillFirst_77'))
 E.click(T.main,'  Credits');assert(SC.autoWin.refreshPlayers==nil)
 _G.HeadLockMenuCleanup()
+`);
+await run('Cold cached mobile controller starts shooting without a manual bullet',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true)
+assert(E.fireCount==0)
+SC.setAutoWin(true)
+assert(E.fireCount>=1,'cold pistol still needs a manual first shot')
+assert(E.callbackCalls==0,'discovery invoked the mobile input handler')
+assert(SC.autoWin.objects[E.tool]==E.object)
+_G.HeadLockMenuCleanup()
+`, `
+local E=TestEnv
+E.hum.EquipTool=function(self,tool)tool.Parent=E.localPlayer.Character end
+local pg=E.localPlayer:FindFirstChildOfClass('PlayerGui')
+local mouse=E.new('ScreenGui','Mouse',pg)
+local frame=E.new('Frame','Mobile Frame',mouse)
+E.fireButton=E.new('ImageButton','Mobile Fire',frame)
+E.fireButton.MouseButton1Down=E.signal()
+E.callbackCalls=0
+local callback=function()E.callbackCalls+=1;E.object:fire()end
+getconnections=function(signal)
+ if signal==E.fireButton.MouseButton1Down then return {{Function=callback}}end
+ return {}
+end
+debug=table.clone(debug)
+debug.getupvalues=function(fn)
+ if fn==callback then return {{state={equipped=E.object}}}end
+ return {}
+end
+getgc=nil
+`);
+await run('Cold GC controller is prepared before the next Juggernaut spawns',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true)
+E.owner.Character.Parent=E.survivors
+SC.setAutoWin(true)
+assert(E.fireCount==0 and SC.autoWin.objects[E.tool]==E.object,'pistol was not prepared while waiting')
+E.owner.Character.Parent=E.killers
+SC.stepAutoWin(true)
+assert(E.fireCount>=1,'spawn did not start firing immediately')
+_G.HeadLockMenuCleanup()
+`, `
+TestEnv.hum.EquipTool=function(self,tool)tool.Parent=TestEnv.localPlayer.Character end
+getgc=function()return {TestEnv.object}end
+`);
+await run('Function-only GC results can expose a cached pistol controller',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+assert(E.fireCount>=1 and SC.autoWin.objects[E.tool]==E.object)
+_G.HeadLockMenuCleanup()
+`, `
+local E=TestEnv
+E.hum.EquipTool=function(self,tool)tool.Parent=E.localPlayer.Character end
+local cached=function()return E.object end
+getgc=function()return {cached}end
+debug=table.clone(debug)
+debug.getupvalues=function(fn)if fn==cached then return {E.object}end return {}end
+`);
+await run('Respawned pistol does not inherit old discovery or equip delays',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+local count=E.fireCount;local oldTool=E.tool;local oldObject=E.object
+E.localPlayer.CharacterRemoving:Fire(E.localPlayer.Character)
+local temporary=E.addPlayer('RespawnFixture',91,0,300)
+local c=temporary.Character
+table.remove(E.players,table.find(E.players,temporary));temporary.Parent=nil;temporary.Character=nil
+E.localPlayer.Character=c
+E.tool=E.new('Tool','M1911',E.backpack)
+E.object=table.clone(oldObject);E.object.instance=E.tool;E.object.ammo=8
+E.hum=c:FindFirstChildOfClass('Humanoid')
+E.hum.EquipTool=function(self,tool)tool.Parent=c end
+E.hum.UnequipTools=function(self)E.tool.Parent=E.backpack end
+getgc=function()return {oldObject,E.object}end
+SC.autoWin.nextEquip=E.time+2;SC.autoWin.nextObjectScan=E.time+2
+E.localPlayer.CharacterAdded:Fire(c)
+assert(E.fireCount>count and E.tool.Parent==c,'respawn waited on an old cooldown')
+assert(SC.autoWin.objects[E.tool]==E.object and E.tool~=oldTool)
+_G.HeadLockMenuCleanup()
+`);
+await run('Juggernaut finishes shuffled selected players before the rest',`
+local E,T=TestEnv,__T local SC=T.SC local aw=SC.autoWin
+E.owner.Character.Parent=E.survivors;E.localPlayer.Character.Parent=E.killers
+for i=5,11 do E.addPlayer('Survivor'..i,i,1,300)end
+aw.killFirst[E.owner.UserId]=true;aw.killFirst[E.other.UserId]=true;aw.killFirst[E.other2.UserId]=true
+-- The survivor skip list does not exempt targets when I am Juggernaut.
+aw.skipped[E.owner.UserId]=true
+math=table.clone(math)
+local oldRandom=math.random;local shuffleCalls={}
+math.random=function(n)table.insert(shuffleCalls,n)return 1 end
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+local step=game.services.RunService.Steps.HeadLockMenuJuggernautAutoKill
+local killed={}
+for i=1,3 do
+ step()
+ local p=assert(SC.juggernautAutoKill.target)
+ assert(aw.killFirst[p.UserId]and not killed[p],'non-priority or repeated target before priorities finished')
+ local queue=aw.priorityQueue;step();assert(SC.juggernautAutoKill.target==p and aw.priorityQueue==queue,'reshuffled during a live target')
+ killed[p]=true;p.Character:FindFirstChildOfClass('Humanoid').Health=0
+end
+assert(#shuffleCalls==2 and shuffleCalls[1]==3 and shuffleCalls[2]==2,'not a shuffled queue')
+math.random=oldRandom
+for i=1,7 do
+ step()
+ local p=assert(SC.juggernautAutoKill.target)
+ assert(not aw.killFirst[p.UserId]and not killed[p])
+ killed[p]=true;p.Character:FindFirstChildOfClass('Humanoid').Health=0
+end
+step();assert(not SC.juggernautAutoKill.enabled)
+SC.setAutoWin(false);_G.HeadLockMenuCleanup()
 `);
 await run('Delayed initialization survives respawn and skipped players cancel queued shots',`
 local E,T=TestEnv,__T local SC=T.SC
