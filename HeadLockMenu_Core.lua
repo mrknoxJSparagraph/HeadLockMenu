@@ -35,8 +35,20 @@ local reloadWeapon=nil local originalWeaponReload=nil local wrappedWeaponReload=
 local spreadHooks={} local trackHumanoid=nil local oldAutoRotate=nil
 local trackAttachment=nil local trackOrientation=nil local trackJumpHumanoid=nil local trackJumpConnection=nil local trackTargetRoot=nil
 local trackTargetY=nil local trackTargetRising=false local followContactRoot=nil local followContactHeld=false local lastTrackJump=0 local TRACK_RENDER_NAME="HeadLockMenuTrack"
+SC.autoWin={enabled=false,role=nil,target=nil}
+function SC.autoWinCombat()
+ local aw=SC.autoWin
+ if not aw.enabled or aw.role~="survivor" or not aw.target or SC.paused or SC.closing or not SC.ownerFeatures then return false end
+ local c=aw.target.Character local h=c and c:FindFirstChildOfClass("Humanoid")
+ return aw.target.Parent==Players and not aw.skipped[aw.target.UserId] and c and c.Parent==workspace:FindFirstChild("Killers") and h and h.Health>0
+end
 function SC.rapidFireMax()return SC.ownerFeatures and SC.isOwnerAccount(player)and 1000 or 200 end
-function SC.setOwnerFeatures(value)SC.ownerFeatures=value==true and SC.isOwnerAccount(player)SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())end
+function SC.setOwnerFeatures(value)
+ SC.ownerFeatures=value==true and SC.isOwnerAccount(player)
+ if not SC.ownerFeatures and SC.setAutoWin then SC.setAutoWin(false)end
+ SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())
+ if SC.refreshOwnerCategories then SC.refreshOwnerCategories()end
+end
 autoTrack.clearLock=function()if autoTrack.deathConnection then autoTrack.deathConnection:Disconnect()autoTrack.deathConnection=nil end autoTrack.lockedPlayer=nil autoTrack.lockedCharacter=nil
 autoTrack.lockedHumanoid=nil end autoTrack.stop=function()autoTrack.mode=nil autoTrack.clearLock()table.clear(autoTrack.excluded)end local function mirrorTrackJump()
 if SC.followEnabled and followContactHeld then return end if os.clock()-lastTrackJump<0.35 then return end local character=player.Character
@@ -104,7 +116,7 @@ function SC.setAntiFling(value)
  end
  if state.update then state.update()end if state.updateCredits then state.updateCredits()end
 end
-SC.setAntiFling(true)
+_G.HeadLockAntiFlingEnabled=false
 local playerScripts=player:FindFirstChild("PlayerScripts")
 local checksScript=playerScripts and playerScripts:FindFirstChild("Checks")
 local originalChecksEnabled=checksScript and checksScript.Enabled
@@ -114,6 +126,7 @@ function SC.setWallClip(enabled)
  if SC.wallClip.update then SC.wallClip.update()end
 end
 if checksScript then connect(checksScript:GetPropertyChangedSignal("Enabled"),function()if SC.wallClip.update then SC.wallClip.update()end end)end
+SC.setWallClip(false)
 local function startHitbox(size)if _G.HeadLockHitboxChoice then return end
 _G.HeadLockHitboxChoice=size _G.HeadSize=size _G.Disabled=false _G.HeadLockHitboxTarget=juggernautPlayer _G.HeadLockHitboxConnection=RS.RenderStepped:Connect(function()if _G.Disabled then return end
 for _,target in ipairs(Players:GetPlayers())do if target~=player and target==_G.HeadLockHitboxTarget and not _G.HeadLockAllHitboxChoice then local character=target.Character
@@ -126,14 +139,17 @@ hrp.Transparency=1 hrp.CanCollide=false end end end end)end function SC.restoreH
 part.Size=original.Size part.Transparency=original.Transparency part.CanCollide=original.CanCollide end SC.originals[part]=nil end
 for _,key in ipairs({"HeadLockHitboxConnection","HeadLockAllHitboxConnection"})do local connection=_G[key]if connection then connection:Disconnect()_G[key]=nil end end _G.HeadLockHitboxChoice=nil
 _G.HeadLockAllHitboxChoice=nil _G.HeadLockHitboxTarget=nil end local function removeRapidFire()SC.rapidFireEnabled=false SC.noOverheatEnabled=false
+if SC.autoWin.enabled then return end
+if SC.removeWeaponCaptureHooks then SC.removeWeaponCaptureHooks()end
 if rapidWeapon and rapidWeapon.fire==wrappedWeaponFire then rapidWeapon.fire=originalWeaponFire end if rapidFlamethrower and rapidFlamethrower.fire==wrappedFlamethrowerFire then
 rapidFlamethrower.fire=originalFlamethrowerFire end rapidWeapon=nil originalWeaponFire=nil wrappedWeaponFire=nil rapidFlamethrower=nil originalFlamethrowerFire=nil wrappedFlamethrowerFire=nil end
-local function refillIfEnabled(weapon)if SC.infiniteAmmoEnabled and weapon.instance and not weapon.stolen and type(weapon.refill)=="function"then weapon:refill()end end
+local function refillIfEnabled(weapon)if (SC.infiniteAmmoEnabled or SC.autoWinCombat()) and weapon.instance and not weapon.stolen and type(weapon.refill)=="function"then weapon:refill()end end
 local function clearFlamethrowerHeat(weapon,refreshGui)if SC.noOverheatEnabled and weapon.instance and not weapon.stolen then weapon.heat=0 if refreshGui and type(weapon.update_ammo_gui)=="function"then
-weapon:update_ammo_gui()end end end local function rapidFireInterval(weapon,countFireAnimation)SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())local animationDuration=0
+weapon:update_ammo_gui()end end end local function rapidFireInterval(weapon,countFireAnimation)SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())
+local power=SC.autoWinCombat() and 1000 or SC.rapidFirePower local animationDuration=0
 local fireAnimation=countFireAnimation and weapon.animations and weapon.animations.Fire if fireAnimation then for _,step in ipairs(fireAnimation)do if type(step)=="number"and step>0 then
-animationDuration+=step end end end local normalInterval=math.max(weapon.shoot_wait or 0.1,0.03)+animationDuration if SC.rapidFirePower<=100 then
-return normalInterval+(0.03-normalInterval)*SC.rapidFirePower/100 end return 0.03/(1+(SC.rapidFirePower-100)/100)end local function ensureFlamethrowerHook(weaponModule)if rapidFlamethrower then return true
+animationDuration+=step end end end local normalInterval=math.max(weapon.shoot_wait or 0.1,0.03)+animationDuration if power<=100 then
+return normalInterval+(0.03-normalInterval)*power/100 end return 0.03/(1+(power-100)/100)end local function ensureFlamethrowerHook(weaponModule)if rapidFlamethrower then return true
 end local flameScript=game:GetService("ReplicatedStorage"):WaitForChild("Weapon"):FindFirstChild("Flamethrower")if not flameScript then return false end local ok,flameModule=pcall(require,flameScript)
 if not ok or type(flameModule)~="table"or type(flameModule.fire)~="function"or flameModule.fire==weaponModule.fire then return false end rapidFlamethrower=flameModule
 originalFlamethrowerFire=flameModule.fire wrappedFlamethrowerFire=function(self,...)refillIfEnabled(self)clearFlamethrowerHeat(self)if not SC.rapidFireEnabled or SC.rapidFirePower==0 then
@@ -143,7 +159,8 @@ local results=table.pack(pcall(originalFlamethrowerFire,self,...))self.fire_wait
 error(results[2],0)end return table.unpack(results,2,results.n)end flameModule.fire=wrappedFlamethrowerFire return true end local function ensureFireHook()if rapidWeapon then
 ensureFlamethrowerHook(rapidWeapon)return true end local ok,weaponModule=pcall(function()return require(game:GetService("ReplicatedStorage"):WaitForChild("Weapon",5))end)
 if not ok or type(weaponModule)~="table"or type(weaponModule.fire)~="function"then return false end rapidWeapon=weaponModule originalWeaponFire=weaponModule.fire wrappedWeaponFire=function(self,...)
-refillIfEnabled(self)if not SC.rapidFireEnabled then local results=table.pack(originalWeaponFire(self,...))refillIfEnabled(self)return table.unpack(results,1,results.n)end if SC.rapidFirePower==0 then
+if SC.recordWeapon then SC.recordWeapon(self)end
+refillIfEnabled(self)if not SC.rapidFireEnabled and not SC.autoWinCombat() then local results=table.pack(originalWeaponFire(self,...))refillIfEnabled(self)return table.unpack(results,1,results.n)end if SC.rapidFirePower==0 and not SC.autoWinCombat() then
 local results=table.pack(originalWeaponFire(self,...))refillIfEnabled(self)return table.unpack(results,1,results.n)end local previousWait=self.fire_wait local previousDelay=self.shoot_wait
 local previousAnimation=self.play_animation local interval=rapidFireInterval(self,true)if self.ammo and self.ammo<=0 then task.wait(interval)end self.shoot_wait=interval self.fire_wait=function()
 return task.wait(interval)end self.play_animation=function(weapon,name,...)if name=="Bolt"and weapon.bolt_fire and weapon.instance and(weapon.instance.Name=="AWP"or weapon.instance.Name=="R870"
@@ -162,17 +179,20 @@ end end end end end local target=duration+(0.1-duration)*SC.rapidReloadPower/100
 self._rapidReloadActive=true self.reload_wait=function(delay)if target<duration and target<=0.25 then if not waited then waited=true return task.wait(target)end return end
 return task.wait(type(delay)=="number"and math.max(0,delay*scale)or 0)end local results=table.pack(pcall(originalWeaponReload,self,...))self.reload_wait=previousWait self._rapidReloadActive=nil
 if not results[1]then error(results[2],0)end return table.unpack(results,2,results.n)end weaponModule.reload=wrappedWeaponReload return true end local function removeNoRecoil()SC.noRecoilEnabled=false
+if SC.autoWin.enabled then return end
 for _,hook in ipairs(recoilHooks)do if hook.module[hook.name]==hook.wrapper then hook.module[hook.name]=hook.original end end table.clear(recoilHooks)end local function ensureNoRecoilHook()
+if #recoilHooks>0 then return true end
 local definitions=game:GetService("ReplicatedStorage"):FindFirstChild("Weapon")if not definitions then return false end local ok,base=pcall(require,definitions)
 if not ok or type(base)~="table"or type(base.recoil_camera)~="function"then return false end local function hookMethod(module,name)local original=rawget(module,name)
-if type(original)~="function"then return end local wrapper=function(self,...)if SC.noRecoilEnabled then return end return original(self,...)end module[name]=wrapper table.insert(recoilHooks,{
+if type(original)~="function"then return end local wrapper=function(self,...)if SC.noRecoilEnabled or SC.autoWinCombat() then return end return original(self,...)end module[name]=wrapper table.insert(recoilHooks,{
 module=module,name=name,original=original,wrapper=wrapper,})end for _,name in ipairs({"recoil_camera","move_camera","shake_cam"})do hookMethod(base,name)end
 for _,child in ipairs(definitions:GetChildren())do if child:IsA("ModuleScript")then local loaded,subclass=pcall(require,child)if loaded and type(subclass)=="table"and subclass~=base then
 for _,name in ipairs({"recoil_camera","move_camera","shake_cam"})do hookMethod(subclass,name)end end end end return true end local function removeNoSpread()SC.noSpreadEnabled=false
+if SC.autoWin.enabled then return end
 for _,hook in ipairs(spreadHooks)do if hook.module.compute_inaccuracy==hook.wrapper then hook.module.compute_inaccuracy=hook.original end end table.clear(spreadHooks)end
-local function ensureNoSpreadHook()local definitions=game:GetService("ReplicatedStorage"):FindFirstChild("Weapon")if not definitions then return false end local ok,base=pcall(require,definitions)
+local function ensureNoSpreadHook()if #spreadHooks>0 then return true end local definitions=game:GetService("ReplicatedStorage"):FindFirstChild("Weapon")if not definitions then return false end local ok,base=pcall(require,definitions)
 if not ok or type(base)~="table"or type(base.compute_inaccuracy)~="function"then return false end local function hookModule(module)local original=rawget(module,"compute_inaccuracy")
-if type(original)~="function"then return end local wrapper=function(self,...)if SC.noSpreadEnabled then return 0 end return original(self,...)end module.compute_inaccuracy=wrapper
+if type(original)~="function"then return end local wrapper=function(self,...)if SC.noSpreadEnabled or SC.autoWinCombat() then return 0 end return original(self,...)end module.compute_inaccuracy=wrapper
 table.insert(spreadHooks,{module=module,original=original,wrapper=wrapper})end hookModule(base)for _,child in ipairs(definitions:GetChildren())do if child:IsA("ModuleScript")then
 local loaded,subclass=pcall(require,child)if loaded and type(subclass)=="table"and subclass~=base then hookModule(subclass)end end end return true end local function make(className,properties,parent)
 local object=Instance.new(className)for key,value in pairs(properties)do object[key]=value end object.Parent=parent return object end local function textButton(label,parent,color)
@@ -350,7 +370,12 @@ local otherHumanoid=other and other:FindFirstChildOfClass("Humanoid")local other
 if otherHumanoid.Health<=0 then autoTrack.excluded[candidate]=true else local distance=(otherRoot.Position-root.Position).Magnitude if not nearestDistance or distance<nearestDistance then
 nearest,nearestDistance=candidate,distance end end end end end if nearest then autoTrack.lockTarget(nearest)end end local categoryButtons={}local categoryEntries={}local selectedCategories={}local categoryConnections={}
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
-button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section})local function selectCategory()
+button.Name="Category_"..name button.LayoutOrder=#categoryEntries+1
+button.Text="  "..name button.Visible=section==SC.activeGame and(name~="AutoWin" or(SC.ownerFeatures and SC.isOwnerAccount(player))) table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section,name=name})local function selectCategory()
+if name=="AutoWin" and not(SC.ownerFeatures and SC.isOwnerAccount(player))then return end
+SC.selectedCategory=name
+if SC.vehicles then SC.vehicles.unmount()end
+if SC.autoWin then SC.autoWin.update=nil SC.autoWin.refreshPlayers=nil end
 selectedCategories[section]=selectCategory for _,oldButton in ipairs(categoryButtons)do oldButton.BackgroundColor3=BLACK oldButton.TextColor3=WHITE end button.BackgroundColor3=WHITE
 button.TextColor3=BLACK SC.updateSpeedPanel=nil if SC.fling then SC.fling.update=nil SC.fling.refresh=nil end if SC.wallClip then SC.wallClip.update=nil end if SC.pap then SC.pap.update=nil end if SC.armor then SC.armor.update=nil end if SC.sounds then SC.sounds.update=nil end if SC.spectate then SC.spectate.update=nil end if SC.anti then SC.anti.update=nil end if SC.antiFling then SC.antiFling.update=nil SC.antiFling.updateCredits=nil end updateAimbot=nil updatePlayers=nil updateTrack=nil updateTrackPlayers=nil updateFollow=nil updateFollowPlayers=nil teleportState.refresh=nil teleportState.update=nil
         for _,connection in ipairs(categoryConnections)do connection:Disconnect()end table.clear(categoryConnections)
@@ -643,8 +668,19 @@ function SC.stopJuggernautAutoKill()local s=SC.juggernautAutoKill if not s.enabl
 s.enabled=false s.target=nil local root=s.character and s.character:FindFirstChild("HumanoidRootPart")if s.humanoid and s.humanoid.Parent and s.humanoid.Health>0 then
 s.humanoid.AutoRotate=s.autoRotate if root and s.upright and s.offset then local face=s.upright.LookVector face=Vector3.new(face.X,0,face.Z)if face.Magnitude<0.01 then face=Vector3.new(0,0,-1)end
 s.character:PivotTo(CFrame.lookAt(root.Position,root.Position+face)*s.offset)root.AssemblyAngularVelocity=Vector3.zero root.AssemblyLinearVelocity=Vector3.zero end end if s.button and s.button.Parent then
-s.button.Text="Auto Kill: OFF"s.button.BackgroundColor3=BLACK s.button.TextColor3=WHITE end if s.status and s.status.Parent then s.status.Text="OFF"end end local function autoKillSurvivor(target)
-if not SC.canSelectPlayer(target)then return end local active=workspace:FindFirstChild("Characters to kill")local model=target and target.Character local h=model and model:FindFirstChildOfClass("Humanoid")
+s.button.Text="Auto Kill: OFF"s.button.BackgroundColor3=BLACK s.button.TextColor3=WHITE end if s.status and s.status.Parent then s.status.Text="OFF"end end function SC.startJuggernautAutoKill()
+local s=SC.juggernautAutoKill
+if s.enabled then return true end
+updateJuggernaut()local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local r=c and c:FindFirstChild("HumanoidRootPart")if SC.paused or juggernautPlayer~=player
+or not c or c.Parent~=workspace:FindFirstChild("Killers")or not h or h.Health<=0 or not r then if s.status and s.status.Parent then s.status.Text="Juggernaut only"end return false end if SC.cFlyEnabled then stopCFly()end SC.trackEnabled=false
+SC.followEnabled=false autoTrack.stop()restoreTrackRotation()s.enabled,s.target,s.character,s.humanoid=true,nil,c,h s.autoRotate,s.upright=h.AutoRotate,r.CFrame.Rotation
+s.offset=r.CFrame:ToObjectSpace(c:GetPivot())
+return true
+end
+local function autoKillSurvivor(target)
+local auto=SC.autoWin.enabled and SC.autoWin.role=="juggernaut"
+if auto then if not target or target==player or target.Parent~=Players then return end
+elseif not SC.canSelectPlayer(target)then return end local active=workspace:FindFirstChild("Characters to kill")local model=target and target.Character local h=model and model:FindFirstChildOfClass("Humanoid")
 local head=model and model:FindFirstChild("Head")local root=model and model:FindFirstChild("HumanoidRootPart")if active and model and model.Parent==active and h and h.Health>0
 and head and root and root.Position.Y<SC.combatYLimit and not model:FindFirstChildOfClass("ForceField")then return model,head,root end end addCategory("Juggernaut",function(panel)
 make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Juggernaut",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
@@ -652,10 +688,7 @@ local s=SC.juggernautAutoKill local button=textButton(s.enabled and"Auto Kill: O
 s.status=make("TextLabel",{Position=UDim2.fromOffset(0,86),Size=UDim2.new(1,0,0,40),BackgroundTransparency=1,Text=s.enabled and"Searching..."or"OFF",TextColor3=WHITE,
 TextSize=13,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)local function paint()button.Text=s.enabled and"Auto Kill: ON"or"Auto Kill: OFF"
 button.BackgroundColor3=s.enabled and WHITE or BLACK button.TextColor3=s.enabled and BLACK or WHITE end button.Activated:Connect(function()if s.enabled then SC.stopJuggernautAutoKill()else
-updateJuggernaut()local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local r=c and c:FindFirstChild("HumanoidRootPart")if SC.paused or juggernautPlayer~=player
-or not c or c.Parent~=workspace:FindFirstChild("Killers")or not h or h.Health<=0 or not r then s.status.Text="Juggernaut only"return end if SC.cFlyEnabled then stopCFly()end SC.trackEnabled=false
-SC.followEnabled=false autoTrack.stop()restoreTrackRotation()s.enabled,s.target,s.character,s.humanoid=true,nil,c,h s.autoRotate,s.upright=h.AutoRotate,r.CFrame.Rotation
-s.offset=r.CFrame:ToObjectSpace(c:GetPivot())end paint()end)paint()end)RS:BindToRenderStep("HeadLockMenuJuggernautAutoKill",Enum.RenderPriority.Character.Value+2,function()
+SC.startJuggernautAutoKill()end paint()end)paint()end)RS:BindToRenderStep("HeadLockMenuJuggernautAutoKill",Enum.RenderPriority.Character.Value+2,function()
 local s=SC.juggernautAutoKill if not s.enabled then return end local c=player.Character local h=c and c:FindFirstChildOfClass("Humanoid")local r=c and c:FindFirstChild("HumanoidRootPart")
 if SC.paused or c~=s.character or not h or h.Health<=0 or not r or c.Parent~=workspace:FindFirstChild("Killers")or SC.trackEnabled or SC.followEnabled or SC.cFlyEnabled then SC.stopJuggernautAutoKill()return
 end local model,head,targetRoot=autoKillSurvivor(s.target)if not model then local distance s.target=nil for _,other in ipairs(Players:GetPlayers())do local m,_,part=autoKillSurvivor(other)
@@ -1073,24 +1106,21 @@ removeNoRecoil()else SC.noRecoilEnabled=ensureNoRecoilHook()end updateRecoil()en
 Text="No Bullet Spread",TextColor3=WHITE,TextSize=16,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)local spreadToggle=textButton("OFF",panel)
 spreadToggle.Position=UDim2.fromOffset(0,595)spreadToggle.Size=UDim2.fromOffset(105,36)local function updateSpread()spreadToggle.Text=SC.noSpreadEnabled and"ON"or"OFF"
 spreadToggle.BackgroundColor3=SC.noSpreadEnabled and WHITE or BLACK spreadToggle.TextColor3=SC.noSpreadEnabled and BLACK or WHITE end spreadToggle.Activated:Connect(function()if SC.noSpreadEnabled then
-removeNoSpread()else SC.noSpreadEnabled=ensureNoSpreadHook()end updateSpread()end)updateSpread()end)addCategory("Credits",function(container)local panel=make("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,
-ScrollBarThickness=3,ScrollingDirection=Enum.ScrollingDirection.Y,CanvasSize=UDim2.fromOffset(0,282),},container)make("TextLabel",{Size=UDim2.new(1,0,0,32),
+removeNoSpread()else SC.noSpreadEnabled=ensureNoSpreadHook()end updateSpread()end)updateSpread()end)SC.selectCredits=addCategory("Credits",function(container)local panel=make("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,
+ScrollBarThickness=3,ScrollingDirection=Enum.ScrollingDirection.Y,CanvasSize=UDim2.fromOffset(0,210),},container)make("TextLabel",{Size=UDim2.new(1,0,0,32),
 BackgroundTransparency=1,Text="Credits",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)make("TextLabel",{Position=UDim2.fromOffset(0,42),
 Size=UDim2.new(1,0,0,52),BackgroundTransparency=1,Text="Script made by nonobearbear17\nyallou wanted credits",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,
 TextXAlignment=Enum.TextXAlignment.Left,},panel)make("TextLabel",{Position=UDim2.fromOffset(0,102),Size=UDim2.new(1,0,0,42),BackgroundTransparency=1,Text="pickle helped test the script",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,},panel)
-local features=make("Frame",{Position=UDim2.fromOffset(1,154),Size=UDim2.new(1,-7,0,114),BackgroundColor3=BLACK,BorderSizePixel=0,},panel)
-make("UIStroke",{Color=WHITE,Thickness=1,LineJoinMode=Enum.LineJoinMode.Miter,},features)
-make("TextLabel",{Position=UDim2.fromOffset(9,6),Size=UDim2.new(1,-18,0,42),BackgroundTransparency=1,
-Text="Additional script features (owner only)",TextColor3=WHITE,TextSize=14,TextWrapped=true,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},features)
-local checkbox=textButton("",features)checkbox.Position=UDim2.fromOffset(10,67)checkbox.Size=UDim2.fromOffset(26,26)checkbox.TextSize=20
-local featureStatus=make("TextLabel",{Position=UDim2.fromOffset(47,54),Size=UDim2.new(1,-56,0,54),BackgroundTransparency=1,
-Text="",TextColor3=WHITE,TextSize=12,TextWrapped=true,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},features)
-local function updateFeatures(denied)local checked=SC.ownerFeatures and SC.isOwnerAccount(player)checkbox.Text=checked and"✓"or""
-checkbox.BackgroundColor3=checked and WHITE or BLACK checkbox.TextColor3=checked and BLACK or WHITE
-featureStatus.Text=denied and"haha u no get special stuff only me"or("Rapid Fire max: "..SC.rapidFireMax().."%\nAnti-fling: "..(SC.antiFling.enabled and"ON"or"OFF"))end
-checkbox.Activated:Connect(function()if not SC.isOwnerAccount(player)then updateFeatures(true)return end SC.setOwnerFeatures(not SC.ownerFeatures)updateFeatures(false)end)
-SC.antiFling.updateCredits=function()if panel.Parent then updateFeatures(false)end end
-updateFeatures(false)end)addCategory("Anti-Death",SC.drawAntiDeath)
+local features=make("Frame",{Position=UDim2.fromOffset(1,154),Size=UDim2.new(1,-7,0,48),BackgroundTransparency=1,BorderSizePixel=0},panel)
+local checkbox=textButton("",features)checkbox.Name="OwnerFeaturesCheckbox"checkbox.Position=UDim2.fromOffset(0,8)checkbox.Size=UDim2.fromOffset(26,26)
+make("TextLabel",{Position=UDim2.fromOffset(38,8),Size=UDim2.new(1,-38,0,26),BackgroundTransparency=1,
+Text="(owner only)",TextColor3=WHITE,TextSize=14,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},features)
+local function updateFeatures()
+ local checked=SC.ownerFeatures and SC.isOwnerAccount(player)
+ checkbox.Text=checked and"✓"or""checkbox.BackgroundColor3=checked and WHITE or BLACK checkbox.TextColor3=checked and BLACK or WHITE
+end
+checkbox.Activated:Connect(function()if SC.isOwnerAccount(player)then SC.setOwnerFeatures(not SC.ownerFeatures)end updateFeatures()end)
+updateFeatures()end)addCategory("Anti-Death",SC.drawAntiDeath)
 
 function SC.installSounds()
 
@@ -1349,12 +1379,12 @@ if direction.Magnitude>0 then character:TranslateBy(direction*SC.tpSpeed*10*dt)e
 if not SC.enabled or not SC.canSelectPlayer(SC.selectedPlayer)then return end local targetCharacter=SC.selectedPlayer.Character local targetPart if targetCharacter then if SC.aimPart=="Head"then
 targetPart=targetCharacter:FindFirstChild("Head")else targetPart=targetCharacter:FindFirstChild("Torso")or targetCharacter:FindFirstChild("UpperTorso")or targetCharacter:FindFirstChild("LowerTorso")
 end end local camera=workspace.CurrentCamera if not targetPart or not camera then return end local position=camera.CFrame.Position if(targetPart.Position-position).Magnitude>0.05 then
-camera.CFrame=CFrame.lookAt(position,targetPart.Position)end end)function SC.pauseSession()if SC.paused then return end SC.paused=true SC.stopExtraFeatures(false) SC.stopJuggernautAutoKill()SC.stopFling()
+camera.CFrame=CFrame.lookAt(position,targetPart.Position)end end)function SC.pauseSession()if SC.paused then return end SC.paused=true SC.setAutoWin(false)if SC.vehicles then SC.vehicles.setPaused(true)end SC.stopExtraFeatures(false) SC.stopJuggernautAutoKill()SC.stopFling()
 SC.mainWasVisible=main.Visible SC.enabled=false SC.speedEnabled=false SC.gravity.enabled=false SC.stopGravity()SC.trackEnabled=false SC.followEnabled=false
     autoTrack.stop()restoreTrackRotation() stopCFly()removeRapidFire()removeRapidReload()SC.infiniteAmmoEnabled=false removeNoRecoil()
 removeNoSpread() SC.restoreHitboxes()SC.espEnabled=false SC.gunEspEnabled=false for _,record in pairs(espRecords)do clearEspVisual(record)end
 for gun in pairs(table.clone(gunEspRecords))do removeGunEsp(gun)end main.Visible=false control.Visible=false   SC.banner.Visible=true end function SC.unlockSession()
-if not SC.paused then return end SC.paused=false SC.banner.Visible=false if SC.syncPAPSide then SC.syncPAPSide()end if not shade.Parent then control.Visible=true main.Visible=SC.mainWasVisible hideButton.Text=main.Visible and"Hide"or"Unhide"
+if not SC.paused then return end SC.paused=false if SC.vehicles then SC.vehicles.setPaused(false)end SC.banner.Visible=false if SC.syncPAPSide then SC.syncPAPSide()end if not shade.Parent then control.Visible=true main.Visible=SC.mainWasVisible hideButton.Text=main.Visible and"Hide"or"Unhide"
 selectGame(SC.activeGame) end end connect(game:GetService("TextChatService").MessageReceived,function(message)if SC.isOwnerAccount(player)or not message.TextSource then return end
 local sender=Players:GetPlayerByUserId(message.TextSource.UserId)if not SC.isOwnerAccount(sender)then return end
 local soundCode=tostring(message.Text or""):match("^%s*(.-)%s*$"):lower()
@@ -1362,7 +1392,7 @@ if soundCode=="pausesound"then SC.setSoundsPaused(true)return elseif soundCode==
 local code,username=message.Text:match("^%s*(%S+)%s+(%S+)%s*$")
 if not code or string.lower(username)~=string.lower(player.Name)then return end code=string.lower(code)
 if code==SC.codes.pause then SC.pauseSession()elseif code==SC.codes.unlock then SC.unlockSession()elseif code==SC.codes.kick then player:Kick("Disconnected by script owner. You can rejoin.")end end)
-_G.HeadLockMenuCleanup=function()SC.closing=true SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.setAntiFling(false)if checksScript and checksScript.Parent then checksScript.Enabled=originalChecksEnabled end SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
+_G.HeadLockMenuCleanup=function()SC.closing=true if SC.autoWin.cleanup then SC.autoWin.cleanup()end if SC.vehicles then SC.vehicles.cleanup()end SC.stopExtraFeatures(true)SC.stopJuggernautAutoKill()SC.setAntiFling(false)if checksScript and checksScript.Parent then checksScript.Enabled=originalChecksEnabled end SC.gravity.enabled=false SC.stopGravity()RS:UnbindFromRenderStep(RENDER_NAME)RS:UnbindFromRenderStep(TRACK_RENDER_NAME)
 RS:UnbindFromRenderStep("HeadLockMenuJuggernautAutoKill")SC.stopFling()stopCFly()SC.restoreHitboxes()SC.infiniteAmmoEnabled=false removeRapidFire()removeRapidReload()removeNoRecoil()removeNoSpread()
 autoTrack.stop()restoreTrackRotation()  for target in pairs(table.clone(espRecords))do removeEspPlayer(target)end
 for gun in pairs(table.clone(gunEspRecords))do removeGunEsp(gun)end for _,connection in ipairs(categoryConnections)do connection:Disconnect()end for _,connection in ipairs(connections)do
@@ -1790,6 +1820,1077 @@ SC.papCleanup=_G.HeadLockPAPTripCleanup
 end
 SC.installTripFeatures()
 SC.installPAP()
+
+-- INTEGRATED_VEHICLES_BEGIN
+function SC.installVehicles()
+ return (function(SC)
+local Players=game:GetService('Players')
+local Run=game:GetService('RunService')
+local UIS=game:GetService('UserInputService')
+local Http=game:GetService('HttpService')
+local player=Players.LocalPlayer
+local api={paused=false}
+for _,key in ipairs({'ClassicJeepCleanup','LocalYellowCarCleanup','VehicleGarageCleanup'}) do
+    if type(_G[key])=='function' then pcall(_G[key]) end
+end
+local CONFIG={Car=1269895074,Bike=719165150,Speed=80,Reverse=28,Acceleration=62,ReverseAcceleration=52,Brake=90,Coast=12,Turning=2}
+local settingSpecs={
+    {key='Speed',label='TOP SPEED',min=1,max=300,step=1},
+    {key='Turning',label='TURN TIGHTNESS',min=.2,max=6,step=.05},
+    {key='Acceleration',label='FORWARD ACCELERATION',min=5,max=200,step=1},
+    {key='ReverseAcceleration',label='REVERSE ACCELERATION',min=5,max=200,step=1},
+    {key='Reverse',label='REVERSE TOP SPEED',min=1,max=150,step=1},
+    {key='Brake',label='BRAKING STRENGTH',min=10,max=250,step=1},
+}
+local settingsFile='LocalVehicleGarage_Settings.json'
+local buttonsVisible=true
+local function acceptSettings(saved)
+    if type(saved)~='table' then return end
+    for _,spec in ipairs(settingSpecs) do
+        local value=saved[spec.key]
+        if type(value)=='number' and value==value then CONFIG[spec.key]=math.clamp(value,spec.min,spec.max) end
+    end
+    if type(saved.ButtonsVisible)=='boolean' then buttonsVisible=saved.ButtonsVisible end
+end
+acceptSettings(_G.VehicleGarageSettings)
+if type(readfile)=='function' and type(isfile)=='function' then
+    pcall(function() if isfile(settingsFile) then acceptSettings(Http:JSONDecode(readfile(settingsFile))) end end)
+end
+local function saveSettings()
+    local saved={ButtonsVisible=buttonsVisible}
+    for _,spec in ipairs(settingSpecs) do saved[spec.key]=CONFIG[spec.key] end
+    _G.VehicleGarageSettings=saved
+    if type(writefile)=='function' then pcall(function() writefile(settingsFile,Http:JSONEncode(saved)) end) end
+end
+local UP=Vector3.new(0,1,0)
+local ZERO=Vector3.zero
+local folder=Instance.new('Folder'); folder.Name='LocalVehicleGarage'; folder.Parent=workspace
+local gui=Instance.new('ScreenGui')
+gui.Name='VehicleGarageUI'; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=false; gui.DisplayOrder=9999
+gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=player:WaitForChild('PlayerGui')
+local connections={}
+local function listen(signal,fn)
+    local c=signal:Connect(fn); table.insert(connections,c); return c
+end
+local function make(class,parent,props)
+    local o=Instance.new(class)
+    if class=='TextButton' or class=='TextLabel' or class=='TextBox' then o.Font=Enum.Font.Code end
+    for k,v in pairs(props or {}) do o[k]=v end
+    o.Parent=parent; return o
+end
+local function round(o) make('UIStroke',o,{Color=Color3.new(1,1,1),Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border}) end
+local layout={Gas={x=.87,y=.70,size=68},Brake={x=.76,y=.81,size=68},Left={x=.09,y=.73,size=68},Right={x=.20,y=.73,size=68}}
+local function acceptLayout(saved)
+    if type(saved)~='table' then return end
+    for name,def in pairs(layout) do
+        local p=saved[name]
+        if type(p)=='table' and type(p.x)=='number' and type(p.y)=='number' and type(p.size)=='number'
+            and p.x==p.x and p.y==p.y and p.size==p.size then
+            def.x=math.clamp(p.x,.03,.97); def.y=math.clamp(p.y,.05,.95)
+            def.size=math.clamp(p.size,44,118)
+        end
+    end
+end
+acceptLayout(_G.VehicleGarageLayout)
+local layoutFile='LocalVehicleGarage_Controls.json'
+if type(readfile)=='function' and type(isfile)=='function' then
+    pcall(function() if isfile(layoutFile) then acceptLayout(Http:JSONDecode(readfile(layoutFile))) end end)
+end
+local vehicles={}
+local active=nil
+local held={Gas={},Brake={},Left={},Right={}}
+local inputOwners={}
+local controls={}
+local body,status
+local lastStatus="Spawn a vehicle, then walk onto its seat."
+local menuLinks={}
+local sliderViews={}
+local function menuListen(signal,fn)
+ local c=signal:Connect(fn); table.insert(menuLinks,c); return c
+end
+local sliderDrag=nil
+local closed=false
+local busy=false
+local exitRide,deleteVehicle
+local function resetHeld()
+    for name in pairs(held) do
+        held[name]={}
+        if controls[name] then
+            controls[name].BackgroundColor3=Color3.new(0,0,0)
+            controls[name].TextColor3=Color3.new(1,1,1)
+        end
+    end
+    inputOwners={}
+end
+local function isHeld(name) return next(held[name])~=nil end
+local function viewport() return gui.AbsoluteSize end
+local function refreshControl(name)
+    local b=controls[name]; local l=layout[name]
+    b.Size=UDim2.fromOffset(l.size,l.size)
+    b.Position=UDim2.fromScale(l.x,l.y)
+    b.BackgroundColor3=Color3.new(0,0,0)
+    b.TextColor3=Color3.new(1,1,1)
+    b.Visible=buttonsVisible and not api.paused
+end
+for _,name in ipairs({'Gas','Brake','Left','Right'}) do
+    local b=make('TextButton',gui,{Name=name,AnchorPoint=Vector2.new(.5,.5),Text=string.upper(name),
+        TextColor3=Color3.new(1,1,1),Font=Enum.Font.Code,TextSize=15,
+        BackgroundTransparency=0,AutoButtonColor=false,Active=true,ZIndex=3})
+    round(b); controls[name]=b; refreshControl(name)
+    listen(b.InputBegan,function(input)
+        if input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseButton1 then return end
+        if active and buttonsVisible and not api.paused then
+            held[name][input]=true; inputOwners[input]=name
+            b.BackgroundColor3=Color3.new(1,1,1)
+            b.TextColor3=Color3.new(0,0,0)
+        end
+    end)
+end
+local function report(message)
+    lastStatus=message
+    if status and status.Parent and not closed then status.Text=message end
+end
+local function menuButton(text,x,y,w,callback)
+    local b=make('TextButton',body,{Text=text,Position=x==114 and UDim2.new(.5,0,0,y) or UDim2.fromOffset(x,y),Size=w==222 and UDim2.new(1,-8,0,34) or UDim2.new(.5,-8,0,34),
+        BackgroundColor3=Color3.new(0,0,0),TextColor3=Color3.new(1,1,1),
+        Font=Enum.Font.Code,TextSize=13,ZIndex=7})
+    round(b); menuListen(b.Activated,callback); return b
+end
+local function refreshSlider(spec)
+    local view=sliderViews[spec.key]
+    if not view then return end
+    local value=CONFIG[spec.key]
+    local fraction=(value-spec.min)/(spec.max-spec.min)
+    view.fill.Size=UDim2.fromScale(fraction,1)
+    view.knob.Position=UDim2.fromScale(fraction,.5)
+    view.entry.Text=spec.key=='Turning' and string.format('%.2fx',value) or tostring(math.floor(value+.5))
+end
+local function sliderAt(input)
+    local item=sliderDrag and sliderViews[sliderDrag.key]
+    if not item or not item.track.Parent then return end
+    local spec=item.spec
+    local fraction=math.clamp((input.Position.X-item.track.AbsolutePosition.X)/math.max(1,item.track.AbsoluteSize.X),0,1)
+    CONFIG[spec.key]=math.clamp(math.floor((spec.min+fraction*(spec.max-spec.min))/spec.step+.5)*spec.step,spec.min,spec.max)
+    refreshSlider(spec)
+end
+listen(UIS.InputChanged,function(input)
+    if sliderDrag and (input==sliderDrag.input or (sliderDrag.input.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseMovement)) then
+        sliderAt(input); return
+    end
+end)
+listen(UIS.InputEnded,function(input)
+    local name=inputOwners[input]
+    if name then
+        held[name][input]=nil; inputOwners[input]=nil
+        if not isHeld(name) then refreshControl(name) end
+    end
+    if input.UserInputType==Enum.UserInputType.MouseButton1 then
+        for key,owner in pairs(inputOwners) do
+            if key.UserInputType==Enum.UserInputType.MouseButton1 then held[owner][key]=nil; inputOwners[key]=nil; refreshControl(owner) end
+        end
+    end
+    if sliderDrag and (input==sliderDrag.input or input.UserInputType==Enum.UserInputType.MouseButton1) then
+        sliderDrag=nil; if body and body.Parent then body.ScrollingEnabled=true end; saveSettings()
+    end
+end)
+listen(UIS.WindowFocusReleased,function()
+    resetHeld(); sliderDrag=nil; if body and body.Parent then body.ScrollingEnabled=true end
+    for name in pairs(controls) do refreshControl(name) end
+    saveSettings()
+end)
+
+local function character()
+    local c=player.Character
+    local h=c and c:FindFirstChildWhichIsA('Humanoid')
+    local r=c and c:FindFirstChild('HumanoidRootPart')
+    if not h or not r or h.Health<=0 then return end
+    return c,h,r
+end
+local function weld(a,b)
+    local w=Instance.new('WeldConstraint'); w.Part0=a; w.Part1=b; w.Parent=b; return w
+end
+-- Keep every player's avatar out of local vehicle collisions and ground probes.
+local trackedCharacters={}
+local function refreshGroundFilters()
+    local exclusions={folder}
+    for c in pairs(trackedCharacters) do table.insert(exclusions,c) end
+    for _,v in ipairs(vehicles) do v.ray.FilterDescendantsInstances=exclusions end
+end
+local function protectAvatar(v,c)
+    v.avatarContacts=v.avatarContacts or {}
+    for _,p in ipairs(c:GetDescendants()) do
+        if p:IsA('BasePart') and not v.avatarContacts[p] then
+            local nc=make('NoCollisionConstraint',v.hull,{Part0=p,Part1=v.hull})
+            v.avatarContacts[p]={constraint=nc,character=c}
+        end
+    end
+end
+local function trackCharacter(c)
+    if trackedCharacters[c] then return end
+    local record={}; trackedCharacters[c]=record
+    for _,v in ipairs(vehicles) do protectAvatar(v,c) end
+    record.added=listen(c.DescendantAdded,function(p)
+        if p:IsA('BasePart') then
+            for _,v in ipairs(vehicles) do
+                if not v.dead then protectAvatar(v,c) end
+            end
+        end
+    end)
+    refreshGroundFilters()
+end
+local function untrackCharacter(c)
+    local record=trackedCharacters[c]
+    if record and record.added then record.added:Disconnect() end
+    trackedCharacters[c]=nil
+    for _,v in ipairs(vehicles) do
+        for p,entry in pairs(v.avatarContacts or {}) do
+            if entry.character==c then entry.constraint:Destroy(); v.avatarContacts[p]=nil end
+        end
+    end
+    refreshGroundFilters()
+end
+local function watchPlayer(p)
+    listen(p.CharacterAdded,trackCharacter)
+    listen(p.CharacterRemoving,untrackCharacter)
+    if p.Character then trackCharacter(p.Character) end
+end
+for _,p in ipairs(Players:GetPlayers()) do watchPlayer(p) end
+listen(Players.PlayerAdded,watchPlayer)
+listen(Players.PlayerRemoving,function(p) if p.Character then untrackCharacter(p.Character) end end)
+
+local cameraBinding='VehicleGarageCamera_'..tostring(player.UserId or 0)
+Run:BindToRenderStep(cameraBinding,Enum.RenderPriority.Camera.Value-1,function(dt)
+    local v=active
+    if not v or not v.driver or not v.driver.cameraAnchor or v.dead then return end
+    local driver=v.driver
+    local desired=(v.seat.CFrame*CFrame.new(0,v.seat.Size.Y/2+3,0)).Position
+    local velocity=v.hull:GetVelocityAtPosition(desired)
+    local alpha=1-math.exp(-22*math.min(dt,.1))
+    driver.cameraPosition=driver.cameraPosition:Lerp(desired+velocity*.025,alpha)
+    driver.cameraAnchor.CFrame=CFrame.new(driver.cameraPosition)
+end)
+
+local function beginRide(v,c,h,r)
+    if active or v.dead or api.paused then return end
+    if SC.autoWin and SC.autoWin.enabled then SC.setAutoWin(false) end
+    SC.stopConflictingMovement()
+    SC.gravity.enabled=false; SC.stopGravity()
+    -- The disabled Seat is only a contact trigger. It must never create a
+    -- SeatWeld, which merges the character with the client-only vehicle.
+    v.seat.Disabled=true
+    local stale=v.seat:FindFirstChild('SeatWeld')
+    if stale then stale:Destroy() end
+    active=v
+    v.driver={char=c,hum=h,root=r,auto=h.AutoRotate,assemblyRoot=r.AssemblyRootPart}
+    h.AutoRotate=false
+    h.Sit=true
+    protectAvatar(v,c)
+    local attachment=make('Attachment',r,{Name='GarageDriverAttachment'})
+    local target=v.seat.CFrame*CFrame.new(0,v.seat.Size.Y/2+1.5,0)
+    local mass=math.max(r.AssemblyMass,1)
+    -- OneAttachment mode uses a WORLD target, not an attachment on the car.
+    -- Neither this constraint nor the orientation constraint connects the
+    -- driver's physics mechanism to any client-created vehicle part.
+    local follow=make('AlignPosition',r,{
+        Name='GarageDriverFollow',Attachment0=attachment,
+        Mode=Enum.PositionAlignmentMode.OneAttachment,Position=target.Position,
+        ApplyAtCenterOfMass=true,ReactionForceEnabled=false,RigidityEnabled=false,
+        ForceLimitMode=Enum.ForceLimitMode.Magnitude,MaxForce=mass*4000,
+        MaxVelocity=500,Responsiveness=60})
+    local facing=make('AlignOrientation',r,{
+        Name='GarageDriverFacing',Attachment0=attachment,
+        Mode=Enum.OrientationAlignmentMode.OneAttachment,AlignType=Enum.AlignType.AllAxes,
+        CFrame=target.Rotation,ReactionTorqueEnabled=false,RigidityEnabled=false,
+        MaxTorque=mass*40000,MaxAngularVelocity=16,Responsiveness=50})
+    v.driver.follow=follow; v.driver.facing=facing
+    v.driver.objects={follow,facing,attachment}
+    local camera=workspace.CurrentCamera
+    if camera then
+        local anchor=make('Part',folder,{Name='SmoothVehicleCamera',Size=Vector3.new(.1,.1,.1),
+            CFrame=CFrame.new(target.Position+UP*1.5),Anchored=true,Transparency=1,
+            CanCollide=false,CanTouch=false,CanQuery=false})
+        v.driver.camera=camera; v.driver.previousSubject=camera.CameraSubject
+        v.driver.cameraAnchor=anchor; v.driver.cameraPosition=anchor.Position
+        table.insert(v.driver.objects,anchor)
+        camera.CameraSubject=anchor
+    end
+    resetHeld()
+    report('Driving '..v.kind..'. Jump exits. Character moves independently.')
+end
+exitRide=function()
+    local v=active; if not v then return end
+    active=nil; resetHeld(); v.lastExit=os.clock()
+    local driver=v.driver; v.driver=nil
+    if driver then
+        if driver.camera and driver.camera.CameraSubject==driver.cameraAnchor then
+            driver.camera.CameraSubject=(driver.previousSubject and driver.previousSubject.Parent) and driver.previousSubject or driver.hum
+        end
+        for _,obj in ipairs(driver.objects or {}) do obj:Destroy() end
+    end
+    local sw=v.seat:FindFirstChild('SeatWeld'); if sw then sw:Destroy() end
+    v.seat.Disabled=true
+    if driver and driver.hum.Parent then
+        driver.hum.AutoRotate=driver.auto; driver.hum.Sit=false
+        driver.hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+    local constraints=v.driverConstraints; v.driverConstraints={}
+    task.delay(.8,function()
+        for _,n in ipairs(constraints) do n:Destroy() end
+        -- Keep the contact seat disabled: no native SeatWeld should be created.
+    end)
+    report('Exited. Walk onto any vehicle seat to drive.')
+end
+listen(UIS.JumpRequest,exitRide)
+listen(UIS.InputBegan,function(input,processed)
+    if not processed and input.KeyCode==Enum.KeyCode.Space then exitRide() end
+end)
+listen(player.CharacterRemoving,exitRide)
+local function bounds(entries,ref)
+    local lo=Vector3.new(math.huge,math.huge,math.huge)
+    local hi=Vector3.new(-math.huge,-math.huge,-math.huge)
+    for _,p in ipairs(entries) do
+        for _,x in ipairs({-1,1}) do for _,y in ipairs({-1,1}) do for _,z in ipairs({-1,1}) do
+            local q=ref:PointToObjectSpace(p.CFrame:PointToWorldSpace(p.Size*Vector3.new(x,y,z)/2))
+            lo=Vector3.new(math.min(lo.X,q.X),math.min(lo.Y,q.Y),math.min(lo.Z,q.Z))
+            hi=Vector3.new(math.max(hi.X,q.X),math.max(hi.Y,q.Y),math.max(hi.Z,q.Z))
+        end end end
+    end
+    return lo,hi
+end
+local function nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
+-- Try only the nearest front/right/left/rear slots. Never grow
+-- a serial grid that pushes later spawns away from the character.
+local right=Vector3.new(-yawLook.Z,0,yawLook.X)
+local ahead=math.max(5,extent.Z/2+3)
+local beside=math.max(4,extent.X/2+3)
+local rp=RaycastParams.new(); rp.FilterType=Enum.RaycastFilterType.Exclude
+local exclusions={folder}
+for tracked in pairs(trackedCharacters) do table.insert(exclusions,tracked) end
+rp.FilterDescendantsInstances=exclusions; rp.RespectCanCollide=true
+local overlap=OverlapParams.new(); overlap.FilterType=Enum.RaycastFilterType.Exclude
+local ignored={c}
+for tracked in pairs(trackedCharacters) do table.insert(ignored,tracked) end
+overlap.FilterDescendantsInstances=ignored; overlap.RespectCanCollide=true
+local spawnCF
+for _,offset in ipairs({yawLook*ahead,right*beside,-right*beside,-yawLook*ahead}) do
+    local candidate=r.Position+offset
+    local floor=workspace:Raycast(candidate+UP*6,-UP*16,rp)
+    if floor and floor.Normal.Y>.4 then
+        candidate=Vector3.new(candidate.X,floor.Position.Y+averageRadius*1.5+.25,candidate.Z)
+        local cf=CFrame.lookAt(candidate,candidate+yawLook)
+        local geometryOffset=(lo+hi)/2-origin
+        local box=cf*CFrame.new(geometryOffset+UP*.2)
+        local clear=true
+        for _,part in ipairs(workspace:GetPartBoundsInBox(box,Vector3.new(extent.X+.3,math.max(.5,extent.Y-.4),extent.Z+.3),overlap)) do
+            if part.CanCollide then clear=false; break end
+        end
+        if clear then spawnCF=cf; break end
+    end
+end
+assert(spawnCF,'No clear space beside you. Move a few steps and try again.')
+return spawnCF,rp
+end
+local function newVehicle(kind)
+    if busy then return end
+    local c,h,r=character(); if not c then report('Spawn your character first.'); return end
+    busy=true; report('Loading '..kind..'…')
+    task.spawn(function()
+        local model
+        local success,err=pcall(function()
+            local objects=game:GetObjects('rbxassetid://'..CONFIG[kind])
+            model=objects and objects[1]
+            if closed then if model then model:Destroy() end; return end
+            assert(model,'Asset loader returned no model.')
+            assert(player.Character==c and h.Parent and h.Health>0,'Your character changed while loading. Spawn the vehicle again.')
+            if not model:IsA('Model') then
+                local wrapper=Instance.new('Model'); model.Parent=wrapper; model=wrapper
+            end
+            local sourceSeat=model:FindFirstChildWhichIsA('VehicleSeat',true) or model:FindFirstChildWhichIsA('Seat',true)
+            assert(sourceSeat,'Model has no seat; cannot determine its forward direction.')
+            local ref=sourceSeat.CFrame
+            local originalParts,visibleParts,wheelParts={},{},{}
+            for _,p in ipairs(model:GetDescendants()) do
+                if p:IsA('BasePart') then
+                    p.Anchored=true; table.insert(originalParts,p)
+                    if p.Transparency<.95 then table.insert(visibleParts,p) end
+                    local ancestor=p; local wheel=false
+                    while ancestor and ancestor~=model do
+                        local name=string.lower(ancestor.Name)
+                        if string.find(name,'wheel',1,true) or string.find(name,'tire',1,true) or string.find(name,'tyre',1,true) or (name=='rim' or string.match(name,'^rim[%s_%-%.%d]')) then wheel=true end
+                        ancestor=ancestor.Parent
+                    end
+                    if wheel and p.Transparency<.95 then table.insert(wheelParts,p) end
+                end
+            end
+            assert(#visibleParts>0,'No visible geometry in this model.')
+            for _,p in ipairs(model:GetDescendants()) do
+                if p:IsA('LuaSourceContainer') or p:IsA('JointInstance') or p:IsA('Constraint') or p:IsA('BodyMover') then p:Destroy() end
+            end
+            local lo,hi=bounds(visibleParts,ref); local extent=hi-lo
+            -- Preserve the downloaded geometry; classify only likely road wheels.
+            local groups=kind=='Bike' and {{},{}} or {{},{},{},{}}
+            local midZ=(lo.Z+hi.Z)/2
+            local wheelSet={}
+            for _,p in ipairs(wheelParts) do
+                local localPos=ref:PointToObjectSpace(p.Position)
+                if localPos.Y<lo.Y+extent.Y*.55 then
+                    local index=localPos.Z<midZ and 1 or 2
+                    if kind=='Car' then index=(localPos.X<0 and 1 or 2)+(localPos.Z>midZ and 2 or 0) end
+                    table.insert(groups[index],p); wheelSet[p]=true
+                end
+            end
+            local wheelInfo={}; local averageY=0; local averageRadius=0
+            for i,g in ipairs(groups) do
+                local center,radius
+                if #g>0 then
+                    local a,b=bounds(g,ref); center=(a+b)/2
+                    radius=math.clamp(math.max(b.Y-a.Y,b.Z-a.Z)/2,.65,2.3)
+                else
+                    radius=math.clamp(extent.Y*.18,.85,1.7)
+                    local front=kind=='Bike' and i==1 or kind=='Car' and i<=2
+                    center=Vector3.new(kind=='Bike' and (lo.X+hi.X)/2 or (i%2==1 and lo.X+radius*.35 or hi.X-radius*.35),lo.Y+radius,midZ+(front and -1 or 1)*extent.Z*.32)
+                end
+                wheelInfo[i]={position=center,radius=radius,parts=g}
+                averageY=averageY+center.Y/#groups; averageRadius=averageRadius+radius/#groups
+            end
+            local origin=Vector3.new((lo.X+hi.X)/2,averageY+averageRadius*.5,midZ)
+            local chassisRef=ref*CFrame.new(origin)
+            local yawLook=r.CFrame.LookVector; yawLook=Vector3.new(yawLook.X,0,yawLook.Z)
+            yawLook=yawLook.Magnitude>.01 and yawLook.Unit or Vector3.new(0,0,-1)
+            local spawnCF,rp=nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
+            local hull=make('Part',model,{Name='StableChassis',Size=Vector3.new(math.max(kind=='Bike' and 1.2 or 2.5,extent.X*.70),.8,math.max(3,extent.Z*.70)),
+                CFrame=spawnCF,Transparency=1,Anchored=true,CanCollide=true,CanTouch=false,RootPriority=-127,
+                CustomPhysicalProperties=PhysicalProperties.new(2,.15,0,100,100)})
+            local v={model=model,hull=hull,kind=kind,wheels={},links={},driverConstraints={},lastExit=-10,
+                heading=math.atan2(-yawLook.X,-yawLook.Z),steer=0,dead=false,ray=rp,normal=UP}
+            model.PrimaryPart=hull; model.Name='Local'..kind
+            -- Replace VehicleSeat with a passive Seat so the native mobile vehicle
+            -- controller never injects a competing throttle or steering signal.
+            local seatCF=chassisRef:ToObjectSpace(sourceSeat.CFrame); local seatSize=sourceSeat.Size
+            sourceSeat.Transparency=1; sourceSeat.CanTouch=false
+            local seat=make('Seat',model,{Name='DriverSeat',Size=seatSize,CFrame=spawnCF*seatCF,
+                Transparency=1,Anchored=true,CanCollide=false,CanTouch=true,Massless=true,Disabled=true})
+            v.seat=seat; weld(hull,seat)
+            for _,p in ipairs(originalParts) do
+                local localCF=chassisRef:ToObjectSpace(p.CFrame)
+                p.CFrame=spawnCF*localCF; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false; p.Massless=true; p.RootPriority=-127
+                if p:IsA('Seat') or p:IsA('VehicleSeat') then p.Disabled=true end
+                if not wheelSet[p] then weld(hull,p) end
+            end
+            for i,w in ipairs(wheelInfo) do
+                local pos=w.position-origin
+                local mount=make('Attachment',hull,{Position=pos+UP*1.2})
+                local force=make('VectorForce',hull,{Attachment0=mount,RelativeTo=Enum.ActuatorRelativeTo.World,Force=ZERO,ApplyAtCenterOfMass=false})
+                local wheel={mount=mount,force=force,position=pos,radius=w.radius,rest=1.2,travel=2.7,angle=0,joints={},height=0,front=kind=='Bike' and i==1 or kind=='Car' and i<=2}
+                for _,p in ipairs(w.parts) do
+                    local original=spawnCF:ToObjectSpace(p.CFrame)
+                    local joint=make('Motor6D',hull,{Name='VisualWheel',Part0=hull,Part1=p,C0=CFrame.new(pos),C1=original:Inverse()*CFrame.new(pos)})
+                    table.insert(wheel.joints,joint)
+                end
+                table.insert(v.wheels,wheel)
+            end
+            local att=make('Attachment',hull)
+            v.drive=make('VectorForce',hull,{Attachment0=att,RelativeTo=Enum.ActuatorRelativeTo.World,ApplyAtCenterOfMass=true,Force=ZERO})
+            v.balance=make('AlignOrientation',hull,{Attachment0=att,Mode=Enum.OrientationAlignmentMode.OneAttachment,
+                AlignType=Enum.AlignType.AllAxes,Responsiveness=20,MaxAngularVelocity=12,MaxTorque=100000,RigidityEnabled=false,CFrame=spawnCF.Rotation})
+            model.Parent=folder
+            for _,p in ipairs(model:GetDescendants()) do if p:IsA('BasePart') then p.Anchored=false end end
+            table.insert(vehicles,v)
+            for c in pairs(trackedCharacters) do protectAvatar(v,c) end
+            refreshGroundFilters()
+            local function on(signal,fn) local connection=signal:Connect(fn); table.insert(v.links,connection) end
+            on(seat.Touched,function(hit)
+                local cc,hh,rr=character()
+                if not cc or active or v.dead or os.clock()-v.lastExit<1 or not hit:IsDescendantOf(cc) then return end
+                if (rr.Position-seat.Position).Magnitude>6 then return end
+                beginRide(v,cc,hh,rr)
+            end)
+            report(kind..' spawned. '..#vehicles..' total. Walk onto its seat.')
+        end)
+        if not success then if model then model:Destroy() end; report('Load failed: '..string.sub(tostring(err),1,150)) end
+        busy=false
+    end)
+end
+deleteVehicle=function(v)
+    if not v or v.dead then return end
+    if active==v then exitRide() end
+    v.dead=true
+    for _,c in ipairs(v.links) do c:Disconnect() end
+    v.model:Destroy()
+    for i,item in ipairs(vehicles) do if item==v then table.remove(vehicles,i); break end end
+end
+local function longitudinalAcceleration(speed,gas,brake,driven)
+    local target,rate=0,CONFIG.Coast
+    if driven then
+        if brake then
+            -- Holding BRAKE crosses smoothly through zero into reverse.
+            target=-CONFIG.Reverse
+            rate=speed>.15 and CONFIG.Brake or CONFIG.ReverseAcceleration
+            if gas then target=0; rate=CONFIG.Brake end
+        elseif gas then
+            target=CONFIG.Speed
+            rate=speed<-.15 and CONFIG.Brake or CONFIG.Acceleration
+        end
+    else rate=CONFIG.Brake end
+    -- Acceleration is applied to actual measured speed immediately.
+    -- No target-speed ramp followed by a second slow response filter.
+    local driveAcceleration=math.clamp((target-speed)*14,-rate,rate)
+    return driveAcceleration
+end
+local function inputs()
+    local gas,brake=isHeld('Gas'),isHeld('Brake')
+    local turn=(isHeld('Right') and 1 or 0)-(isHeld('Left') and 1 or 0)
+    if not UIS:GetFocusedTextBox() then
+        gas=gas or UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.Up)
+        brake=brake or UIS:IsKeyDown(Enum.KeyCode.S) or UIS:IsKeyDown(Enum.KeyCode.Down)
+        if UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.Left) then turn=turn-1 end
+        if UIS:IsKeyDown(Enum.KeyCode.D) or UIS:IsKeyDown(Enum.KeyCode.Right) then turn=turn+1 end
+    end
+    if api.paused then return false,false,0 end
+    return gas,brake,math.clamp(turn,-1,1)
+end
+local function sampleGround(v,wheel,origin)
+    local probeRadius=wheel.radius*.8
+    local extra=wheel.radius-probeRadius
+    local hit=workspace:Spherecast(origin,probeRadius,-UP*(wheel.travel+extra),v.ray)
+    if hit and hit.Normal.Y>.35 then return hit,hit.Distance-extra end
+    -- Spherecasts miss surfaces overlapping the starting sphere. A raised ray
+    -- keeps suspension support when a wheel is briefly compressed into a step.
+    local raise=wheel.radius*1.25
+    hit=workspace:Raycast(origin+UP*raise,-UP*(wheel.travel+raise+wheel.radius),v.ray)
+    if hit and hit.Normal.Y>.35 then
+        return hit,hit.Distance-raise-wheel.radius
+    end
+    return nil,wheel.travel
+end
+local lastError=0
+listen(Run.PreSimulation,function(dt)
+    dt=math.min(dt,.05)
+    local cc,hh=character()
+    if active and (api.paused or not hh or active.driver.hum~=hh or (SC.autoWin and SC.autoWin.enabled)) then exitRide() end
+    if active and hh then
+        -- Ignore the mobile walking stick while driving. Touch buttons supply
+        -- independent inputs, so native walking controls cannot fight the seat.
+        hh:Move(ZERO,false)
+        local v=active
+        local driver=v.driver
+        local target=v.seat.CFrame*CFrame.new(0,v.seat.Size.Y/2+1.5,0)
+        driver.follow.Position=target.Position+v.hull:GetVelocityAtPosition(target.Position)*math.min(dt,.025)*.5
+        driver.follow.MaxVelocity=math.max(500,CONFIG.Speed*2)
+        driver.facing.CFrame=target.Rotation
+    end
+    local gas,brake,turn=inputs()
+    for _,v in ipairs(vehicles) do
+        if not v.dead and v.model.Parent then
+            local success,err=pcall(function()
+                local hull=v.hull; local cf=hull.CFrame
+                local mass=hull.AssemblyMass
+                if mass==math.huge or mass<=0 then return end
+                local forward=cf.LookVector; local lateral=cf.RightVector
+                local velocity=hull.AssemblyLinearVelocity
+                local speed=velocity:Dot(forward)
+                local driven=active==v
+                local driveAcceleration=longitudinalAcceleration(speed,gas,brake,driven)
+                v.steer=v.steer+((driven and turn or 0)-v.steer)*(1-math.exp(-24*dt))
+                local support=0; local normalSum=ZERO
+                for _,wheel in ipairs(v.wheels) do
+                    local origin=wheel.mount.WorldPosition
+                    local hit,distance=sampleGround(v,wheel,origin)
+                    if hit then
+                        local quarterMass=mass/#v.wheels
+                        local stiffness=quarterMass*workspace.Gravity/1.1
+                        local damping=2*math.sqrt(stiffness*quarterMass)*.9
+                        local pointVelocity=hull:GetVelocityAtPosition(origin):Dot(UP)
+                        local load=quarterMass*workspace.Gravity+(wheel.rest-distance)*stiffness-pointVelocity*damping
+                        wheel.force.Force=UP*math.clamp(load,0,quarterMass*workspace.Gravity*3.5)
+                        support=support+1; normalSum=normalSum+hit.Normal
+                    else wheel.force.Force=ZERO end
+                    wheel.height=wheel.height+(math.clamp(wheel.rest-distance,-1.2,1.2)-wheel.height)*(1-math.exp(-14*dt))
+                    wheel.angle=(wheel.angle+speed/wheel.radius*dt)%(math.pi*2)
+                    -- The wheel hub has the vehicle's axes, so rotation is applied
+                    -- about its actual axle, independent of each mesh's orientation.
+                    local steerAngle=wheel.front and -v.steer*math.rad(math.clamp(18+CONFIG.Turning*8,18,58))/(1+math.abs(speed)/140) or 0
+                    for _,joint in ipairs(wheel.joints) do
+                        joint.Transform=CFrame.new(0,wheel.height,0)*CFrame.Angles(0,steerAngle,0)*CFrame.Angles(wheel.angle,0,0)
+                    end
+                end
+                if support>0 then
+                    local raw=normalSum.Unit
+                    local slope=Vector3.new(raw.X*.65,math.max(.75,raw.Y),raw.Z*.65).Unit
+                    v.normal=v.normal:Lerp(slope,1-math.exp(-5*dt)).Unit
+                    local yawRate=-v.steer*math.clamp(speed/7,-1,1)*2*CONFIG.Turning/(1+math.abs(speed)/140)
+                    v.heading=v.heading+yawRate*dt
+                    local gripLimit=100+CONFIG.Turning*70
+                    local grip=math.clamp(-velocity:Dot(lateral)*(10+CONFIG.Turning*2),-gripLimit,gripLimit)
+                    local traction=(forward*driveAcceleration+lateral*grip)*mass
+                    v.drive.Force=traction*math.min(1,support/2)
+                else
+                    v.drive.Force=ZERO
+                    v.normal=v.normal:Lerp(UP,1-math.exp(-2*dt)).Unit
+                end
+                local facing=Vector3.new(-math.sin(v.heading),0,-math.cos(v.heading))
+                local tangent=facing-v.normal*facing:Dot(v.normal)
+                if tangent.Magnitude>.01 then v.balance.CFrame=CFrame.lookAt(ZERO,tangent.Unit,v.normal) end
+                v.balance.MaxTorque=mass*workspace.Gravity*math.max(5,hull.Size.Z)*2
+            end)
+            if not success and os.clock()-lastError>3 then
+                lastError=os.clock(); report('Vehicle error: '..string.sub(tostring(err),1,130)); warn(err)
+            end
+        end
+    end
+end)
+function api.cleanup()
+    if closed then return end
+    while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
+    api.unmount()
+    closed=true
+    Run:UnbindFromRenderStep(cameraBinding)
+    for _,c in ipairs(connections) do c:Disconnect() end
+    folder:Destroy(); gui:Destroy(); _G.VehicleGarageCleanup=nil
+end
+
+
+function api.unmount()
+    if sliderDrag then saveSettings() end
+    sliderDrag=nil; sliderViews={}
+    for _,c in ipairs(menuLinks) do c:Disconnect() end
+    table.clear(menuLinks)
+    body=nil; status=nil
+end
+function api.setPaused(value)
+    api.paused=value==true
+    if api.paused then exitRide() end
+    resetHeld()
+    for name in pairs(controls) do refreshControl(name) end
+end
+function api.draw(container)
+    api.unmount()
+    body=make('ScrollingFrame',container,{Name='VehicleSettings',Size=UDim2.fromScale(1,1),
+        BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,
+        CanvasSize=UDim2.fromOffset(0,802),ScrollingDirection=Enum.ScrollingDirection.Y,Active=true})
+    make('TextLabel',body,{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text='Vehicles',
+        TextColor3=Color3.new(1,1,1),Font=Enum.Font.Code,TextSize=20,TextXAlignment=Enum.TextXAlignment.Left})
+    menuButton('Spawn Car',0,40,222,function() newVehicle('Car') end)
+    menuButton('Spawn Motorcycle',0,82,222,function() newVehicle('Bike') end)
+    menuButton('Delete One',0,124,108,function()
+        deleteVehicle(active or vehicles[#vehicles]); report(#vehicles..' vehicles remaining.')
+    end)
+    menuButton('Delete All',114,124,108,function()
+        while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
+        report('All spawned vehicles deleted.')
+    end)
+    menuButton('Exit Vehicle',0,166,222,exitRide)
+local toggle
+local function toggleText() toggle.Text=buttonsVisible and 'Controls: ON' or 'Controls: OFF' end
+toggle=menuButton('Controls',0,210,222,function()
+    buttonsVisible=not buttonsVisible; resetHeld()
+    for name in pairs(controls) do refreshControl(name) end
+    toggleText(); saveSettings()
+    report(buttonsVisible and 'Driving buttons shown.' or 'Driving buttons hidden. Keyboard controls still work.')
+end)
+toggleText()
+for index,spec in ipairs(settingSpecs) do
+    local y=258+(index-1)*82
+    make('TextLabel',body,{Position=UDim2.fromOffset(0,y),Size=UDim2.new(1,-78,0,20),BackgroundTransparency=1,
+        Text=spec.label,TextXAlignment=Enum.TextXAlignment.Left,TextColor3=Color3.new(1,1,1),TextSize=11,Font=Enum.Font.Code,ZIndex=7})
+    local entry=make('TextBox',body,{Name=spec.key..'Value',Position=UDim2.new(1,-70,0,y-2),Size=UDim2.fromOffset(58,24),
+        BackgroundColor3=Color3.new(0,0,0),TextColor3=Color3.new(1,1,1),TextSize=12,Font=Enum.Font.Code,
+        ClearTextOnFocus=false,Text='',ZIndex=8})
+    round(entry)
+    -- A 34px touch target surrounds the thinner visible slider.
+    local track=make('TextButton',body,{Name=spec.key..'Slider',Position=UDim2.fromOffset(4,y+24),Size=UDim2.new(1,-20,0,34),
+        Text='',BackgroundTransparency=1,AutoButtonColor=false,Active=true,ZIndex=8})
+    local rail=make('Frame',track,{Position=UDim2.fromScale(0,.4),Size=UDim2.fromScale(1,.2),BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,ZIndex=8})
+    round(rail)
+    local fill=make('Frame',rail,{Size=UDim2.fromScale(0,1),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=8})
+    round(fill)
+    local knob=make('Frame',track,{AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(0,.5),Size=UDim2.fromOffset(18,24),
+        BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=9})
+    round(knob)
+    if spec.key=='Turning' then
+        make('TextLabel',body,{Position=UDim2.fromOffset(4,y+58),Size=UDim2.new(1,-20,0,17),BackgroundTransparency=1,
+            Text='WIDE     →     MEDIUM     →     VERY TIGHT',TextSize=9,Font=Enum.Font.Code,TextColor3=Color3.new(1,1,1),ZIndex=7})
+    end
+    sliderViews[spec.key]={spec=spec,track=track,fill=fill,knob=knob,entry=entry}
+    refreshSlider(spec)
+    menuListen(track.InputBegan,function(input)
+        if input.UserInputType~=Enum.UserInputType.Touch and input.UserInputType~=Enum.UserInputType.MouseButton1 then return end
+        sliderDrag={input=input,key=spec.key}; body.ScrollingEnabled=false; sliderAt(input)
+    end)
+    menuListen(entry.FocusLost,function()
+        local value=tonumber((entry.Text:gsub('[xX]','')))
+        if value and value==value then CONFIG[spec.key]=math.clamp(value,spec.min,spec.max) end
+        refreshSlider(spec); saveSettings()
+    end)
+end
+
+    status=make('TextLabel',body,{Name='VehicleStatus',Position=UDim2.fromOffset(0,754),Size=UDim2.new(1,-8,0,42),
+        BackgroundTransparency=1,Text=lastStatus,TextWrapped=true,TextSize=12,
+        Font=Enum.Font.Code,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left})
+end
+api.spawn=newVehicle
+api.exit=exitRide
+api.deleteAll=function() while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end end
+api.settings=CONFIG
+_G.VehicleGarageCleanup=api.cleanup
+SC.vehicles=api
+return api
+
+end)(SC)
+end
+-- INTEGRATED_VEHICLES_END
+-- INTEGRATED_AUTOWIN_BEGIN
+(function(SC,ctx)
+local Players,Run,player=ctx.Players,ctx.Run,ctx.player
+local aw=SC.autoWin
+aw.skipped={}; aw.objects=setmetatable({},{__mode="kv"}); aw.arguments=setmetatable({},{__mode="k"})
+aw.hooks={}; aw.watches={}; aw.generation=0; aw.nextShot=0; aw.nextEquip=0; aw.status="OFF"
+local function report(text)
+    if aw.status==text then return end
+    aw.status=text
+    if aw.update then aw.update() end
+end
+function SC.recordWeapon(object,args)
+    if type(object)~="table" then return end
+    local tool=rawget(object,"instance")
+    if typeof(tool)~="Instance" or not tool:IsA("Tool") or tool.Name~="M1911" then return end
+    aw.objects[tool]=object
+    if args then aw.arguments[tool]=args end
+end
+function SC.removeWeaponCaptureHooks()
+    for i=#aw.hooks,1,-1 do
+        local hook=aw.hooks[i]
+        if hook.module[hook.name]==hook.wrapper then hook.module[hook.name]=hook.original end
+    end
+    table.clear(aw.hooks)
+end
+local function captureWeaponMethods()
+    if #aw.hooks>0 then return true end
+    local definitions=game:GetService("ReplicatedStorage"):FindFirstChild("Weapon")
+    if not definitions then return false end
+    local modules={definitions}
+    local pistol=definitions:FindFirstChild("M1911")
+    if pistol then table.insert(modules,pistol) end
+    local loaded={}
+    for _,script in ipairs(modules) do
+        local ok,module=pcall(require,script)
+        if ok and type(module)=="table" and not loaded[module] then
+            loaded[module]=true
+            -- Observe methods the equipped weapon already calls. Preserve their
+            -- original arguments/return values, including constructor results.
+            for _,name in ipairs({"new","equip","equipped","on_equipped","update_ammo_gui","play_animation","fire"}) do
+                local original=rawget(module,name)
+                if type(original)=="function" then
+                    local wrapper=function(self,...)
+                        SC.recordWeapon(self,name=="fire" and table.pack(...) or nil)
+                        local results=table.pack(original(self,...))
+                        for i=1,results.n do SC.recordWeapon(results[i]) end
+                        return table.unpack(results,1,results.n)
+                    end
+                    module[name]=wrapper
+                    table.insert(aw.hooks,{module=module,name=name,original=original,wrapper=wrapper})
+                end
+            end
+        end
+    end
+    return next(loaded)~=nil
+end
+local function findWeaponObject(tool,now)
+    local object=aw.objects[tool]
+    if object and object.instance==tool then return object end
+    if now<(aw.nextObjectScan or 0) or type(getgc)~="function" then return end
+    aw.nextObjectScan=now+2
+    local ok,objects=pcall(getgc,true)
+    if ok and type(objects)=="table" then
+        for _,candidate in ipairs(objects) do
+            if type(candidate)=="table" and rawget(candidate,"instance")==tool then
+                local valid,fire=pcall(function()return candidate.fire end)
+                if valid and type(fire)=="function" then SC.recordWeapon(candidate); return candidate end
+            end
+        end
+    end
+end
+local function living(target,container)
+    local c=target and target.Character
+    local h=c and c:FindFirstChildOfClass("Humanoid")
+    local r=c and c:FindFirstChild("HumanoidRootPart")
+    if c and c.Parent==container and h and h.Health>0 and r then return c,h,r end
+end
+local function releaseFlight()
+    local flight=aw.flight
+    aw.flight=nil
+    if not flight then return end
+    if flight.root.Parent then
+        flight.root.Anchored=flight.anchored
+        flight.root.AssemblyLinearVelocity=Vector3.zero
+    end
+    if flight.hum.Parent then flight.hum.AutoRotate=flight.autoRotate end
+    for part,value in pairs(flight.collisions) do if part.Parent then part.CanCollide=value end end
+end
+local function stopOwnedKill()
+    if aw.ownsKill then SC.stopJuggernautAutoKill(); aw.ownsKill=false end
+end
+local function resetRole()
+    aw.generation=aw.generation+1
+    aw.role=nil; aw.target=nil
+    releaseFlight(); stopOwnedKill()
+end
+local function followTarget(c,h,r,targetRoot)
+    local flight=aw.flight
+    if flight and flight.root~=r then releaseFlight(); flight=nil end
+    if not flight then
+        flight={root=r,hum=h,anchored=r.Anchored,autoRotate=h.AutoRotate,collisions={}}
+        aw.flight=flight
+    end
+    for _,part in ipairs(c:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if flight.collisions[part]==nil then flight.collisions[part]=part.CanCollide end
+            part.CanCollide=false
+        end
+    end
+    h.AutoRotate=false; r.Anchored=true; r.AssemblyLinearVelocity=Vector3.zero
+    local aim=targetRoot.Position+Vector3.new(0,1,0)
+    local position=targetRoot.Position-targetRoot.CFrame.LookVector*3+Vector3.new(0,.5,0)
+    c:PivotTo(CFrame.lookAt(position,aim)*r.CFrame:ToObjectSpace(c:GetPivot()))
+end
+function SC.setAutoWin(value)
+    value=value==true and SC.ownerFeatures and SC.isOwnerAccount(player) and not SC.paused and not SC.closing
+    if value==aw.enabled then return value end
+    aw.session=(aw.session or 0)+1
+    aw.enabled=value; resetRole()
+    if value then
+        aw.resume={fly=SC.cFlyEnabled,followJug=SC.cFlyFollowJug}
+        ctx.stopMovement()
+        if SC.vehicles then SC.vehicles.exit() end
+        SC.gravity.enabled=false; SC.stopGravity()
+        aw.nextEquip=0; aw.nextObjectScan=0; aw.nextShot=0; aw.initialized=false
+        report("Preparing M1911...")
+        local session=aw.session
+        task.spawn(function()
+            local ok,reason=pcall(function()
+                assert(ctx.ensureFire(),"Weapon controller unavailable")
+                if not aw.enabled or aw.session~=session then return end
+                assert(captureWeaponMethods(),"Weapon controller unavailable")
+                assert(ctx.ensureRecoil(),"No Recoil hook unavailable")
+                assert(ctx.ensureSpread(),"No Spread hook unavailable")
+            end)
+            if not aw.enabled or aw.session~=session then
+                if not aw.enabled then SC.removeWeaponCaptureHooks() end
+                return
+            end
+            aw.initialized=ok
+            if ok then SC.stepAutoWin(true) else report("AutoWin could not start: "..tostring(reason)) end
+        end)
+    else
+        SC.removeWeaponCaptureHooks()
+        report("OFF")
+        local resume=aw.resume; aw.resume=nil
+        if resume and resume.fly and not SC.paused and not SC.closing and player.Character then
+            if ctx.startFly() then SC.cFlyFollowJug=resume.followJug end
+        end
+    end
+    if aw.update then aw.update() end
+    return value
+end
+local function equipPistol(c,h,now)
+    local tool=c:FindFirstChild("M1911")
+    local backpack=player:FindFirstChildOfClass("Backpack")
+    if not tool then tool=backpack and backpack:FindFirstChild("M1911") end
+    if not tool or not tool:IsA("Tool") then report("Waiting for M1911 in inventory"); return end
+    if tool.Parent~=c and now>=aw.nextEquip then
+        aw.nextEquip=now+.5
+        h:EquipTool(tool)
+    elseif tool.Parent==c and not aw.objects[tool] and now>=aw.nextEquip then
+        -- Hooks installed after an existing equip need one fresh equip event.
+        aw.nextEquip=now+2
+        if backpack then h:UnequipTools(); h:EquipTool(tool) end
+    end
+    if tool.Parent~=c then return end
+    return tool
+end
+function SC.stepAutoWin(refresh)
+    if not aw.enabled or not aw.initialized then return end
+    if SC.paused or SC.closing or not SC.ownerFeatures or not SC.isOwnerAccount(player) then SC.setAutoWin(false); return end
+    if refresh then ctx.updateJuggernaut() end
+    local killers=workspace:FindFirstChild("Killers")
+    local survivors=workspace:FindFirstChild("Characters to kill")
+    local target=ctx.getJuggernaut()
+    local mine,h,r=living(player,player.Character and player.Character.Parent)
+    if not mine or (mine.Parent~=killers and mine.Parent~=survivors) or SC.tripKind or (SC.fling and SC.fling.active) then
+        if aw.role then resetRole() end
+        report("Waiting for round..."); return
+    end
+    if target==player and mine.Parent==killers then
+        if aw.role~="juggernaut" then resetRole(); aw.role="juggernaut" end
+        if not SC.juggernautAutoKill.enabled and os.clock()>=(aw.nextKillStart or 0) then
+            aw.nextKillStart=os.clock()+.15
+            aw.ownsKill=SC.startJuggernautAutoKill()==true
+        end
+        report("Juggernaut: Auto Kill ON"); return
+    end
+    local model,_,targetRoot=living(target,killers)
+    if not model or target==player or mine.Parent~=survivors or aw.skipped[target.UserId] then
+        if aw.role then resetRole() end
+        report(model and aw.skipped[target.UserId] and ("Skipping "..target.Name) or "Waiting for Juggernaut...")
+        return
+    end
+    if aw.role~="survivor" or aw.target~=target then
+        resetRole(); aw.role="survivor"; aw.target=target; aw.nextShot=0
+    end
+    if SC.cFlyEnabled then ctx.stopFly() end
+    SC.trackEnabled=false; SC.followEnabled=false; SC.speedEnabled=false
+    if SC.juggernautAutoKill.enabled then SC.stopJuggernautAutoKill() end
+    followTarget(mine,h,r,targetRoot)
+    local now=os.clock()
+    local tool=equipPistol(mine,h,now)
+    if not tool then return end
+    local object=findWeaponObject(tool,now)
+    if not object then report("Waiting for equipped M1911 controller..."); return end
+    if aw.firing or now<aw.nextShot then return end
+    local generation=aw.generation
+    aw.nextShot=now+.003; aw.firing=true
+    task.spawn(function()
+        local ok,reason=pcall(function()
+            if not aw.enabled or aw.generation~=generation or tool.Parent~=player.Character or aw.skipped[target.UserId] then return end
+            local args=aw.arguments[tool] or table.pack()
+            assert(type(object.fire)=="function","M1911 firing method unavailable")
+            local head=model:FindFirstChild("Head") or targetRoot
+            local camera=workspace.CurrentCamera
+            if camera and (head.Position-camera.CFrame.Position).Magnitude>.05 then
+                camera.CFrame=CFrame.lookAt(camera.CFrame.Position,head.Position)
+            end
+            object:fire(table.unpack(args,1,args.n))
+        end)
+        aw.firing=false
+        if not aw.enabled or aw.generation~=generation then return end
+        if ok then report("Following "..target.Name.." | 1000%")
+        else aw.nextShot=os.clock()+1; report("M1911: "..string.sub(tostring(reason),1,110)) end
+    end)
+end
+local function changed()
+    if aw.enabled then task.defer(function()if aw.enabled and not SC.closing then SC.stepAutoWin(true) end end) end
+end
+local function watchPlayer(p)
+    local record={links={}}; aw.watches[p]=record
+    local function watchCharacter(c)
+        for _,link in ipairs(record.characterLinks or {}) do link:Disconnect() end
+        record.characterLinks={}
+        local function on(signal,callback)table.insert(record.characterLinks,signal:Connect(callback))end
+        on(c:GetPropertyChangedSignal("Parent"),changed)
+        on(c.ChildAdded,changed)
+        local h=c:FindFirstChildOfClass("Humanoid")
+        if h then on(h.Died,changed) end
+        changed()
+    end
+    table.insert(record.links,p.CharacterAdded:Connect(watchCharacter))
+    table.insert(record.links,p.CharacterRemoving:Connect(function()
+        if p==player then resetRole() end
+        changed()
+    end))
+    if p.Character then watchCharacter(p.Character) end
+end
+local function unwatchPlayer(p)
+    local record=aw.watches[p]
+    if record then
+        for _,links in ipairs({record.links,record.characterLinks or {}}) do for _,link in ipairs(links) do link:Disconnect() end end
+        aw.watches[p]=nil
+    end
+    if aw.target==p then resetRole() end
+    if aw.refreshPlayers then task.defer(aw.refreshPlayers) end
+end
+for _,p in ipairs(Players:GetPlayers()) do watchPlayer(p) end
+ctx.connect(Players.PlayerAdded,function(p)watchPlayer(p); if aw.refreshPlayers then aw.refreshPlayers() end end)
+ctx.connect(Players.PlayerRemoving,unwatchPlayer)
+ctx.connect(Run.Heartbeat,function()SC.stepAutoWin(false)end)
+Run:BindToRenderStep("HeadLockMenuAutoWinFollow",Enum.RenderPriority.Character.Value+3,function()
+    if aw.enabled and aw.role=="survivor" and not SC.paused then SC.stepAutoWin(false) end
+end)
+Run:BindToRenderStep("HeadLockMenuAutoWinAim",Enum.RenderPriority.Camera.Value+2,function()
+    if not SC.autoWinCombat() then return end
+    local target=aw.target and aw.target.Character
+    local head=target and (target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart"))
+    local camera=workspace.CurrentCamera
+    if head and camera and (head.Position-camera.CFrame.Position).Magnitude>.05 then
+        camera.CFrame=CFrame.lookAt(camera.CFrame.Position,head.Position)
+    end
+end)
+function aw.cleanup()
+    SC.setAutoWin(false)
+    SC.removeWeaponCaptureHooks()
+    for p in pairs(aw.watches) do unwatchPlayer(p) end
+    Run:UnbindFromRenderStep("HeadLockMenuAutoWinFollow")
+    Run:UnbindFromRenderStep("HeadLockMenuAutoWinAim")
+end
+function aw.draw(panel)
+    local make,button=ctx.make,ctx.button
+    make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="AutoWin",TextColor3=ctx.white,
+        Font=Enum.Font.Code,TextSize=20,TextXAlignment=Enum.TextXAlignment.Left},panel)
+    local toggle=button("OFF",panel); toggle.Name="AutoWinToggle"; toggle.Position=UDim2.fromOffset(0,38); toggle.Size=UDim2.fromOffset(105,38)
+    local status=make("TextLabel",{Name="AutoWinStatus",Position=UDim2.fromOffset(0,82),Size=UDim2.new(1,0,0,40),
+        BackgroundTransparency=1,Text=aw.status,TextWrapped=true,TextColor3=ctx.white,Font=Enum.Font.Code,TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left},panel)
+    make("TextLabel",{Position=UDim2.fromOffset(0,126),Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,
+        Text="Skip auto kill on players:",TextColor3=ctx.white,Font=Enum.Font.Code,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left},panel)
+    local names=button("Players",panel); names.Name="AutoWinPlayers"; names.Position=UDim2.fromOffset(0,154); names.Size=UDim2.new(1,-5,0,36)
+    local list=make("ScrollingFrame",{Name="AutoWinPlayerList",Position=UDim2.fromOffset(0,198),Size=UDim2.new(1,0,1,-200),
+        BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,CanvasSize=UDim2.fromOffset(0,0),Visible=aw.listOpen==true},panel)
+    make("UIListLayout",{Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder},list)
+    aw.update=function()
+        if not toggle.Parent then return end
+        toggle.Text=aw.enabled and "ON" or "OFF"
+        toggle.BackgroundColor3=aw.enabled and ctx.white or ctx.black
+        toggle.TextColor3=aw.enabled and ctx.black or ctx.white
+        status.Text=aw.status
+        list.Visible=aw.listOpen==true
+        local count=0; for _,p in ipairs(Players:GetPlayers()) do if p~=player and aw.skipped[p.UserId] then count=count+1 end end
+        names.Text="Players ("..count.." selected)"
+    end
+    aw.refreshPlayers=function()
+        if not list.Parent then return end
+        for _,child in ipairs(list:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+        local players=Players:GetPlayers(); table.sort(players,function(a,b)return a.Name:lower()<b.Name:lower()end)
+        local count=0
+        for _,p in ipairs(players) do if p~=player then
+            count=count+1
+            local selected=aw.skipped[p.UserId]
+            local row=button((selected and "[x] " or "[ ] ")..p.Name,list)
+            row.Name="Skip_"..p.UserId; row.LayoutOrder=count; row.Size=UDim2.new(1,-6,0,34)
+            row.TextSize=13; row.TextXAlignment=Enum.TextXAlignment.Left; row.TextTruncate=Enum.TextTruncate.AtEnd
+            row.BackgroundColor3=selected and ctx.white or ctx.black; row.TextColor3=selected and ctx.black or ctx.white
+            row.Activated:Connect(function()
+                aw.skipped[p.UserId]=not aw.skipped[p.UserId] or nil
+                SC.stepAutoWin(true); aw.refreshPlayers(); aw.update()
+            end)
+        end end
+        list.CanvasSize=UDim2.fromOffset(0,count*38+4)
+        aw.update()
+    end
+    toggle.Activated:Connect(function()SC.setAutoWin(not aw.enabled)end)
+    names.Activated:Connect(function()aw.listOpen=not aw.listOpen; aw.update()end)
+    aw.refreshPlayers(); aw.update()
+end
+return aw
+end)(SC,{Players=Players,Run=RS,player=player,connect=connect,make=make,button=textButton,black=BLACK,white=WHITE,
+ stopMovement=SC.stopConflictingMovement,stopFly=stopCFly,startFly=startCFly,
+ ensureFire=ensureFireHook,ensureRecoil=ensureNoRecoilHook,ensureSpread=ensureNoSpreadHook,
+ updateJuggernaut=updateJuggernaut,getJuggernaut=function()return juggernautPlayer end})
+-- INTEGRATED_AUTOWIN_END
+addCategory("Vehicles",function(panel)
+ local ok,reason=pcall(function()
+  if not SC.vehicles then SC.installVehicles()end
+  SC.vehicles.draw(panel)
+ end)
+ if not ok then make("TextLabel",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Text="Vehicles could not start:\n"..tostring(reason),TextWrapped=true,TextColor3=WHITE,Font=Enum.Font.Code,TextSize=14},panel)end
+end)
+addCategory("AutoWin",SC.autoWin.draw)
+function SC.refreshOwnerCategories()
+ for _,entry in ipairs(categoryEntries)do
+  entry.button.Visible=entry.section==SC.activeGame and(entry.name~="AutoWin"or(SC.ownerFeatures and SC.isOwnerAccount(player)))
+ end
+ if SC.selectedCategory=="AutoWin"and not SC.ownerFeatures then SC.selectCredits()end
+end
+SC.refreshOwnerCategories()
+_G.HeadLockMenuVersion="2026-11-26-vehicles-autowin"
 
 SC.watchOwnerEmotes()
 

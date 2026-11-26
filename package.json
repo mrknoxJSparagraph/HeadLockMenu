@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python3 scripts/embed_integrations.py",
+    "test": "node tests/integrations.mjs && node tests/regressions.mjs",
+    "test:physics": "python3 tests/run_vehicle_physics.py"
+  },
+  "devDependencies": {
+    "luau-web": "1.5.1"
+  }
+}
