@@ -1913,11 +1913,12 @@ local function receive(data)
     ctx.reconcile(records,net)
 end
 local function tick()
+    local active=ctx.current()
     local item
-    if net.connected then item=table.remove(net.queue,1) end
+    local renew=net:isDriver(active) and active.leaseUntil-os.clock()<1.4
+    if net.connected and not renew then item=table.remove(net.queue,1) end
     local fields=item and item.fields or {}
     local op=not net.connected and 'join' or item and item.op or 'sync'
-    local active=ctx.current()
     local moving
     if op=='sync' and net:isDriver(active) then
         active.netSeq=(active.netSeq or 0)+1
@@ -1969,14 +1970,14 @@ if not ctx.manual then
         while not net.closed do
             local ok,why=pcall(tick)
             if not ok then net.connected=false;net.error=tostring(why);ctx.report('Shared reconnecting')end
-            task.wait(net.connected and .12 or 2)
+            task.wait(net.connected and (ctx.current() and .12 or next(net.records) and .3 or 1.5) or 2)
         end
     end)
 end
 return net
 end)(ctx)
 end
-SC.vehicleRelayURL=""
+SC.vehicleRelayURL="https://headlock-vehicle-sync.vercel.app/v1"
 function SC.installVehicles()
 return (function(SC)
 local Players=game:GetService('Players')
@@ -3465,7 +3466,7 @@ function SC.refreshOwnerCategories()
  end
 end
 SC.refreshOwnerCategories()
-_G.HeadLockMenuVersion="2026-11-26-vehicles-sync-prepared"
+_G.HeadLockMenuVersion="2026-11-27-shared-vehicles"
 
 SC.watchOwnerEmotes()
 
