@@ -21,7 +21,11 @@ The separate Kill First list shuffles selected eligible players once per
 round and finishes them before other survivors. AutoWin and Follow Jug
 share the exact position function. Existing pistol controllers are located
 before firing, including cached mobile handlers when the executor supports
-connection/upvalue inspection; no manual first shot is used for discovery.
+connection/upvalue inspection. Finding a controller does not initialize firing.
+AutoWin first attempts the normal game input, preserves normal first-shot setup,
+and saves the firing arguments only after a successful observed shot. Subsequent
+shots replay those arguments; stale context triggers another startup attempt.
+Unavailable automatic input is reported rather than treated as successful firing.
 Wall clip and Anti-Fling start OFF. The existing account restriction is a
 client menu gate, rather than a server authorization boundary.
 

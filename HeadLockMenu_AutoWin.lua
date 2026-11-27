@@ -5,10 +5,38 @@ local aw=SC.autoWin
 aw.skipped={}; aw.killFirst={}; aw.objects=setmetatable({},{__mode="kv"}); aw.arguments=setmetatable({},{__mode="k"})
 aw.modules={}; aw.equipRefresh=setmetatable({},{__mode="k"})
 aw.hooks={}; aw.watches={}; aw.generation=0; aw.nextShot=0; aw.nextEquip=0; aw.status="OFF"
+aw.ready=setmetatable({},{__mode="k"});aw.replaying=setmetatable({},{__mode="k"})
+aw.busy=setmetatable({},{__mode="k"});aw.shots=setmetatable({},{__mode="k"})
+aw.observed=setmetatable({},{__mode="k"});aw.shotLinks={};aw.nextPrime=0
 local function report(text)
     if aw.status==text then return end
     aw.status=text
     if aw.update then aw.update() end
+end
+local function firingReady(tool,object)
+    local ready=tool and aw.ready[tool]
+    return ready~=nil and ready.object==object and ready.character==player.Character
+        and tool.Parent==player.Character
+end
+local function localPistol(object)
+    local tool=type(object)=="table" and rawget(object,"instance")
+    if typeof(tool)=="Instance" and tool:IsA("Tool") and tool.Name=="M1911"
+        and tool.Parent==player.Character then return tool end
+end
+function SC.autoWinNeedsFirstShot(object)
+    local tool=localPistol(object)
+    return aw.enabled and SC.autoWinCombat() and tool and not firingReady(tool,object)
+end
+local function observeTool(tool)
+    if aw.observed[tool] then return end
+    local handle=tool:FindFirstChild("Handle")
+    local sound=handle and handle:FindFirstChild("Fire")
+    if sound and sound:IsA("Sound") then
+        aw.observed[tool]=true
+        table.insert(aw.shotLinks,sound.Played:Connect(function()
+            aw.shots[tool]=(aw.shots[tool] or 0)+1
+        end))
+    end
 end
 function SC.recordWeapon(object,args)
     if type(object)~="table" then return end
@@ -45,10 +73,33 @@ local function captureWeaponMethods()
                 local original=rawget(module,name)
                 if type(original)=="function" then
                     local wrapper=function(self,...)
-                        SC.recordWeapon(self,name=="fire" and table.pack(...) or nil)
-                        local results=table.pack(original(self,...))
-                        for i=1,results.n do SC.recordWeapon(results[i]) end
-                        return table.unpack(results,1,results.n)
+                        SC.recordWeapon(self)
+                        local tool=name=="fire" and localPistol(self)
+                        if not tool or not aw.enabled then
+                            local results=table.pack(original(self,...))
+                            for i=1,results.n do SC.recordWeapon(results[i]) end
+                            return table.unpack(results,1,results.n)
+                        end
+                        observeTool(tool)
+                        local args=table.pack(...)
+                        local normalInput=not aw.replaying[self]
+                        local before=aw.shots[tool] or 0
+                        local ammoBefore=self.ammo
+                        local generation=aw.generation
+                        aw.busy[self]=(aw.busy[self] or 0)+1
+                        local results=table.pack(pcall(original,self,...))
+                        local ammoAfter=self.ammo
+                        aw.busy[self]=math.max(0,(aw.busy[self] or 1)-1)
+                        local observed=(aw.shots[tool] or 0)>before or(type(ammoBefore)=="number"
+                            and type(ammoAfter)=="number" and ammoAfter<ammoBefore)
+                        if results[1] and normalInput and observed and aw.enabled
+                            and aw.generation==generation and localPistol(self)==tool then
+                            aw.ready[tool]={object=self,character=player.Character}
+                            SC.recordWeapon(self,args)
+                        end
+                        if not results[1] then error(results[2],0) end
+                        for i=2,results.n do SC.recordWeapon(results[i]) end
+                        return table.unpack(results,2,results.n)
                     end
                     module[name]=wrapper
                     table.insert(aw.hooks,{module=module,name=name,original=original,wrapper=wrapper})
@@ -167,6 +218,122 @@ local function living(target,container)
     local r=c and c:FindFirstChild("HumanoidRootPart")
     if c and c.Parent==container and h and h.Health>0 and r then return c,h,r end
 end
+local function releaseInput(primer)
+    local release=primer and primer.release
+    if release then primer.release=nil;pcall(release) end
+end
+local function cancelPrime()
+    local primer=aw.primer
+    aw.primer=nil
+    releaseInput(primer)
+end
+local function sendSignal(signal,...)
+    local sent=false
+    if type(getconnections)=="function" then
+        local ok,links=pcall(getconnections,signal)
+        if ok and type(links)=="table" then for _,link in ipairs(links) do
+            local valid,callback=pcall(function()return link.Function end)
+            if valid and type(callback)=="function" then
+                local worked=pcall(callback,...);sent=worked or sent
+            else
+                local worked=pcall(function(...)link:Fire(...)end,...);sent=worked or sent
+            end
+        end end
+    end
+    if not sent and type(firesignal)=="function" then sent=pcall(firesignal,signal,...) end
+    return sent
+end
+local function primeWeapon(tool,now)
+    if aw.primer or now<aw.nextPrime then return end
+    local object=aw.objects[tool]
+    if object and (aw.busy[object] or 0)>0 then return end
+    aw.nextPrime=now+4
+    local primer={tool=tool,generation=aw.generation}
+    aw.primer=primer
+    local function current()
+        return aw.primer==primer and aw.enabled and not SC.paused and not SC.closing
+            and aw.generation==primer.generation and SC.autoWinCombat()
+            and not aw.skipped[aw.target.UserId] and tool.Parent==player.Character
+    end
+    local function waitForReady()
+        local deadline=os.clock()+.25
+        repeat
+            if not current() or firingReady(tool,aw.objects[tool]) then return end
+            task.wait(.02)
+        until os.clock()>=deadline
+    end
+    task.spawn(function()
+        if not current() then
+            if aw.primer==primer then aw.primer=nil end
+            return
+        end
+        local input=game:GetService("UserInputService")
+        local gui=player:FindFirstChildOfClass("PlayerGui")
+        local mouseGui=gui and gui:FindFirstChild("Mouse")
+        local mobile=mouseGui and mouseGui:FindFirstChild("Mobile Frame")
+        local button=mobile and mobile:FindFirstChild("Mobile Fire")
+        local camera=workspace.CurrentCamera
+        local view=camera and camera.ViewportSize or Vector2.new(800,600)
+        local point=Vector2.new(view.X*.5,view.Y*.5)
+        if button and button.Visible and button.AbsoluteSize.X>0 and button.AbsoluteSize.Y>0 then
+            point=button.AbsolutePosition+button.AbsoluteSize/2
+        end
+        local methods={}
+        local function click(name,down,up)
+            table.insert(methods,{name=name,run=function()
+                primer.release=up
+                local ok,why=pcall(down)
+                if ok then waitForReady() else primer.error=tostring(why) end
+                releaseInput(primer)
+            end})
+        end
+        local created,virtual=pcall(function()return input:CreateVirtualInput()end)
+        if created and virtual then
+            click("virtual input",function()virtual:SendMouseButton(point,Enum.UserInputType.MouseButton1,true,0)end,
+                function()virtual:SendMouseButton(point,Enum.UserInputType.MouseButton1,false,0)end)
+        end
+        local managerOk,manager=pcall(game.GetService,game,"VirtualInputManager")
+        if managerOk and manager then
+            click("mouse input",function()manager:SendMouseButtonEvent(point.X,point.Y,0,true,game,0)end,
+                function()manager:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)end)
+        end
+        if button then
+            click("fire button",function()sendSignal(button.MouseButton1Down,point.X,point.Y)end,
+                function()sendSignal(button.MouseButton1Up,point.X,point.Y)end)
+            table.insert(methods,{name="fire click",run=function()sendSignal(button.MouseButton1Click)end})
+            if aw.lastInput then
+                table.insert(methods,{name="fire activation",run=function()sendSignal(button.Activated,aw.lastInput,1)end})
+                click("fire touch",function()sendSignal(button.InputBegan,aw.lastInput)end,
+                    function()sendSignal(button.InputEnded,aw.lastInput)end)
+                local icon=button:FindFirstChild("Icon")
+                if icon then
+                    click("fire icon touch",function()sendSignal(icon.InputBegan,aw.lastInput)end,
+                        function()sendSignal(icon.InputEnded,aw.lastInput)end)
+                end
+            end
+        end
+        local mouseOk,mouse=pcall(function()return player:GetMouse()end)
+        if mouseOk and mouse then
+            click("player mouse",function()sendSignal(mouse.Button1Down)end,function()sendSignal(mouse.Button1Up)end)
+        end
+        for _,method in ipairs(methods) do
+            if not current() or firingReady(tool,aw.objects[tool]) then break end
+            report("Starting first trigger: "..method.name)
+            local ok,why=pcall(method.run)
+            releaseInput(primer)
+            if not ok then primer.error=tostring(why) end
+            waitForReady()
+        end
+        releaseInput(primer)
+        if aw.primer==primer then
+            local stillCurrent=current()
+            aw.primer=nil
+            if stillCurrent and not firingReady(tool,aw.objects[tool]) then
+                report("Automatic trigger unavailable. No first shot detected.")
+            end
+        end
+    end)
+end
 local function releaseFlight()
     local flight=aw.flight
     aw.flight=nil
@@ -183,6 +350,7 @@ local function stopOwnedKill()
 end
 local function resetRole()
     aw.generation=aw.generation+1
+    cancelPrime();aw.nextPrime=0
     aw.role=nil; aw.target=nil
     aw.priorityQueue=nil
     aw.nextObjectScan=0
@@ -301,7 +469,7 @@ function SC.stepAutoWin(refresh)
     local tool,object
     if mine.Parent==survivors then
         tool=equipPistol(mine,h,now)
-        if tool then object=findWeaponObject(tool,now) end
+        if tool then observeTool(tool);object=findWeaponObject(tool,now) end
     end
     if target==player and mine.Parent==killers then
         if aw.role~="juggernaut" then resetRole(); aw.role="juggernaut" end
@@ -326,7 +494,12 @@ function SC.stepAutoWin(refresh)
     followTarget(mine,h,r,targetRoot)
     if not tool then return end
     object=object or aw.objects[tool]
-    if not object then report("Waiting for equipped M1911 controller..."); return end
+    if not firingReady(tool,object) then
+        primeWeapon(tool,now)
+        object=aw.objects[tool]
+        if not firingReady(tool,object) then return end
+    end
+    if aw.primer or (aw.busy[object] or 0)>0 then return end
     if aw.firing or now<aw.nextShot then return end
     local generation=aw.generation
     aw.nextShot=now+.003; aw.firing=true
@@ -340,7 +513,13 @@ function SC.stepAutoWin(refresh)
             if camera and (head.Position-camera.CFrame.Position).Magnitude>.05 then
                 camera.CFrame=CFrame.lookAt(camera.CFrame.Position,head.Position)
             end
-            object:fire(table.unpack(args,1,args.n))
+            aw.replaying[object]=true
+            local results=table.pack(pcall(object.fire,object,table.unpack(args,1,args.n)))
+            aw.replaying[object]=nil
+            if not results[1] then
+                aw.ready[tool]=nil;aw.arguments[tool]=nil;aw.nextPrime=0
+                error(results[2],0)
+            end
         end)
         aw.firing=false
         if not aw.enabled or aw.generation~=generation then return end
@@ -400,6 +579,9 @@ end)
 function aw.cleanup()
     SC.setAutoWin(false)
     SC.removeWeaponCaptureHooks()
+    cancelPrime()
+    for _,link in ipairs(aw.shotLinks) do link:Disconnect() end
+    table.clear(aw.shotLinks)
     for p in pairs(aw.watches) do unwatchPlayer(p) end
     Run:UnbindFromRenderStep("HeadLockMenuAutoWinFollow")
     Run:UnbindFromRenderStep("HeadLockMenuAutoWinAim")
@@ -479,7 +661,10 @@ function aw.draw(panel)
         priorityList.CanvasSize=UDim2.fromOffset(0,count*38+4)
         aw.update()
     end
-    toggle.Activated:Connect(function()SC.setAutoWin(not aw.enabled)end)
+    toggle.Activated:Connect(function(input)
+        if input then aw.lastInput=input end
+        SC.setAutoWin(not aw.enabled)
+    end)
     names.Activated:Connect(function()aw.listOpen=not aw.listOpen; aw.update()end)
     priorityNames.Activated:Connect(function()aw.killListOpen=not aw.killListOpen; aw.update()end)
     aw.refreshPlayers(); aw.update()
