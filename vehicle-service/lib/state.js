@@ -1,4 +1,4 @@
-const LEASE=6000,SESSION=30000;
+const LEASE=15000,SESSION=30000;
 const finite=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(x=>typeof x==='number'&&Number.isFinite(x)&&Math.abs(x)<1e7);
 const id=v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{8,80}$/.test(v)&&!['__proto__','constructor','prototype'].includes(v);
 function pose(v){
