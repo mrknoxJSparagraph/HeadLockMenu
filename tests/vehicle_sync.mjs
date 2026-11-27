@@ -11,9 +11,9 @@ task={spawn=function(fn)table.insert(tasks,fn)end}
 game={PlaceId=4678052190,JobId='same_server_12345'}
 local uid=0
 local http={JSONEncode=function(_,v)return v end,JSONDecode=function(_,v)return v end,GenerateGUID=function()uid+=1;return string.format('generated_%08d',uid)end}
-local cars={};local sequences={};local down=false;local lag=0
+local cars={};local sequences={};local down=false;local lag=0;local serverLeases=false
 request=function(req)
- assert(req.Method=='POST' and req.Timeout==4)
+ assert(req.Method=='POST' and req.Timeout==8)
  local b=req.Body;assert(b.room=='4678052190:same_server_12345' and b.secret~=nil)
  if down then error('offline')end
  clock+=lag
@@ -23,11 +23,11 @@ request=function(req)
   local c=cars[b.id]
   if not c then ok=false;why='missing'
   elseif c.driver and c.driver~=b.session then ok=false;why='occupied'
-  else c.driver=b.session;c.epoch+=1;epoch=c.epoch end
+  else c.driver=b.session;c.epoch+=1;epoch=c.epoch;if serverLeases then c['until']=(clock-lag+15)*1000 end end
  elseif b.op=='sync'and b.move then
   local m=b.move;local c=cars[m.id]
   if not c or c.driver~=b.session or c.epoch~=m.epoch then ok=false;why='lease lost'
-  else c.cf=m.pose.cf;epoch=c.epoch;sequences[b.session]=m.seq end
+  else c.cf=m.pose.cf;epoch=c.epoch;sequences[b.session]=m.seq;if serverLeases then c['until']=(clock-lag+15)*1000 end end
  elseif b.op=='release'then
   local c=cars[b.id];if c and c.driver==b.session and c.epoch==b.epoch then c.driver=nil;c.epoch+=1 end
  elseif b.op=='delete'then
@@ -37,7 +37,7 @@ request=function(req)
   else cars[b.id]=nil end
  end
  local list={};for _,c in pairs(cars)do table.insert(list,table.clone(c))end
- return {StatusCode=200,Body={ok=ok,error=why,epoch=epoch,cars=list}}
+ return {StatusCode=200,Body={ok=ok,error=why,epoch=epoch,cars=list,now=serverLeases and(clock-lag)*1000 or nil}}
 end
 local install=(function() ${source} end)()
 local pose={cf={0,10,0,1,0,0,0,1,0,0,0,1},vel={0,0,0},av={0,0,0}}
@@ -88,6 +88,13 @@ assert(d.net:isDriver(driven));clock+=.8
 local parked={kind='Bike',pose=pose};d.net:register(parked);d.net.tick()
 assert(sequences[d.net.session]==1 and not parked.published,'queued spawn took priority over driver renewal')
 d.net.tick();assert(parked.published and d.net:isDriver(driven))
+serverLeases=true
+local e=client(5);e.net.tick();local slow={kind='Car',pose=pose};e.net:register(slow);e.net.tick()
+lag=4;e.net:claim(slow);e.net.tick();assert(e.active==slow and e.net:isDriver(slow),'valid slow claim was rejected')
+assert(slow.leaseUntil-clock>10 and slow.renewMargin==8,'server lease was not conservatively translated to local time')
+clock+=3;e.net.tick();assert(e.net:isDriver(slow),'slow renewal lost the seat')
+lag=16;e.net:release(slow);e.active=nil;lag=0;e.net.tick();clock+=1
+lag=16;e.net:claim(slow);e.net.tick();assert(e.active==nil,'expired slow response activated a seat');lag=0;e.net.tick()
 local missing=install({Http=http,player={UserId=3}});assert(not missing.enabled and missing.error=='Shared unavailable')
 print('PASS shared spawn visibility, one-seat contention, remote motion, handoff, ownership, lease deadlines, stale replies, reconnect, deletion and unavailable transport')
 `, 'vehicle sync',true)();
