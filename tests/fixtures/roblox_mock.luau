@@ -105,7 +105,7 @@ workspace=TestEnv.new("Workspace","Workspace")workspace.Gravity=196.2
 workspace.CurrentCamera={ViewportSize=Vector2.new(800,600),CFrame=CFrame.new(0,10,0)}
 game={services={}}
 function game:GetService(name)return assert(self.services[name],name)end
-for _,name in ipairs({"Players","RunService","UserInputService","ReplicatedStorage","TextChatService"})do game.services[name]=TestEnv.new("Service",name)end
+for _,name in ipairs({"Players","RunService","UserInputService","ReplicatedStorage","TextChatService","HttpService"})do game.services[name]=TestEnv.new("Service",name)end
 game.services.RunService.Steps={}
 game.services.UserInputService.TouchEnabled=false
 TestEnv.survivors=TestEnv.new("Folder","Characters to kill",workspace)
