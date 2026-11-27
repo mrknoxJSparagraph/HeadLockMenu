@@ -1,0 +1,1 @@
+{"functions":{"api/*.js":{"maxDuration":10}},"rewrites":[{"source":"/v1","destination":"/api/v1"},{"source":"/health","destination":"/api/health"}],"regions":["iad1"]}
