@@ -15,7 +15,7 @@ local endpoint=ctx.endpoint
 local function rpc(op,fields)
     local body={room=room,session=net.session,secret=secret,user=ctx.player.UserId,op=op}
     for key,value in pairs(fields or {}) do body[key]=value end
-    local response=send({Url=endpoint,Method='POST',Headers={['Content-Type']='application/json'},Body=Http:JSONEncode(body),Timeout=4})
+    local response=send({Url=endpoint,Method='POST',Headers={['Content-Type']='application/json'},Body=Http:JSONEncode(body),Timeout=8})
     assert(type(response)=='table' and (response.StatusCode or response.Status)==200,'Shared connection unavailable')
     local data=Http:JSONDecode(response.Body)
     assert(type(data)=='table' and type(data.cars)=='table','Shared response unavailable')
@@ -82,10 +82,17 @@ local function receive(data)
     end
     ctx.reconcile(records,net)
 end
+local function lease(record,data,started)
+ if record and type(record['until'])=='number'and type(data.now)=='number'then
+  local duration=math.clamp((record['until']-data.now)/1000,0,15)
+  return started+math.max(0,duration-.5),math.min(8,duration*.55)
+ end
+ return started+2,1.4
+end
 local function tick()
     local active=ctx.current()
     local item
-    local renew=net:isDriver(active) and active.leaseUntil-os.clock()<1.4
+    local renew=net:isDriver(active) and active.leaseUntil-os.clock()<(active.renewMargin or 1.4)
     if net.connected and not renew then item=table.remove(net.queue,1) end
     local fields=item and item.fields or {}
     local op=not net.connected and 'join' or item and item.op or 'sync'
@@ -112,7 +119,10 @@ local function tick()
     if op=='join' then net.connected=data.ok==true end
     if data.error=='authorization' then net.connected=false end
     if moving and active and data.ok and data.epoch==moving.epoch
-        and active.netId==moving.id and ctx.current()==active then active.leaseUntil=started+2 end
+        and active.netId==moving.id and ctx.current()==active then
+        local record;for _,item in ipairs(data.cars)do if item.id==moving.id then record=item;break end end
+        active.leaseUntil,active.renewMargin=lease(record,data,started)
+    end
     receive(data)
     if item then
         local v=item.v
@@ -122,9 +132,10 @@ local function tick()
         elseif item.op=='claim' then
             net.pending=false
             local record=v and net.records[v.netId]
-            if data.ok and record and record.driver==net.session and os.clock()<started+2
+            local deadline,margin=lease(record,data,started)
+            if data.ok and record and record.driver==net.session and os.clock()<deadline
                 and not v.dead and not ctx.current() then
-                v.epoch=data.epoch;v.netSeq=0;v.leaseUntil=started+2;v.netDriver=net.session
+                v.epoch=data.epoch;v.netSeq=0;v.leaseUntil=deadline;v.renewMargin=margin;v.netDriver=net.session
                 if not ctx.enter(v)then net:release(v)end
             elseif data.ok and record and record.driver==net.session then net:release(v)
             else ctx.report(data.error=='occupied' and 'Occupied' or 'Seat unavailable')end

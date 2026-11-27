@@ -1,2 +1,4 @@
 node_modules/
 __pycache__/
+vehicle-service/public/
+vehicle-service/api/menu.js

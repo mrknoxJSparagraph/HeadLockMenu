@@ -2,8 +2,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "python3 scripts/embed_integrations.py",
-    "test": "python3 tests/comment_stripping.py && node tests/vehicle_sync.mjs && node tests/integrations.mjs && node tests/regressions.mjs",
+    "build": "python3 scripts/embed_integrations.py && python3 scripts/embed_building.py && python3 scripts/build_release.py",
+    "test": "python3 tests/comment_stripping.py && node tests/vehicle_sync.mjs && node tests/integrations.mjs && node tests/regressions.mjs && node tests/building_owner_e2e.mjs",
     "test:physics": "python3 tests/run_vehicle_physics.py",
     "test:relay": "node --test vehicle-service/tests/*.mjs",
     "test:relay:live": "node tests/relay_live.mjs && node tests/vehicle_sync_live.mjs"
