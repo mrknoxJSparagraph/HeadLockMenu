@@ -1,4 +1,4 @@
--- Temporary verification harness. This file is not included in the deliverable.
+
 TestEnv={nodes={},players={},time=10,warnings={}}
 function TestEnv.signal()
  local event={listeners={}}

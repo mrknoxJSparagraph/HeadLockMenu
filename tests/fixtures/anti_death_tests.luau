@@ -51,11 +51,11 @@ baseline=c.Pivots or 0 eq(c.Pivots or 0,baseline,"No escape merely from spawning
 damage(499)eq(c.Pivots or 0,baseline,"Old 1000 HP setting cannot trigger in new 500 HP round")
 damage(357)eq(c.Pivots,baseline+1)
 SC.setAntiThreshold("juggernaut",300)damage(300)eq(c.Pivots,baseline+2,"Juggernaut rearms by lowering slider")
--- Actual C-Fly is stopped and its anchored root is restored before escape.
+
 round("juggernaut",1400)SC.setAntiThreshold("juggernaut",1000)
 E.click(T.main,"  C-Fly")E.click(T.content,"OFF")eq(root.Anchored,true)
 damage(1000)eq(root.Anchored,false)eq(SC.cFlyEnabled,false)
--- The visible Speed toggle must also reflect the automatic movement stop.
+
 round("survivor",100)SC.setAntiThreshold("survivor",60)
 E.click(T.main,"  Speed")E.click(T.content,"OFF")eq(SC.speedEnabled,true)
 damage(60)eq(SC.speedEnabled,false)assert(E.find(T.content,"OFF","TextButton"))
