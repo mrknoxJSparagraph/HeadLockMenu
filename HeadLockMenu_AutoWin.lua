@@ -1,4 +1,4 @@
--- AutoWin installer. Embedded in the core; dependencies use existing menu logic.
+
 return function(SC,ctx)
 local Players,Run,player=ctx.Players,ctx.Run,ctx.player
 local aw=SC.autoWin
@@ -67,8 +67,8 @@ local function captureWeaponMethods()
         if ok and type(module)=="table" and not loaded[module] then
             loaded[module]=true
             aw.modules[module]=true
-            -- Observe methods the equipped weapon already calls. Preserve their
-            -- original arguments/return values, including constructor results.
+
+
             for _,name in ipairs({"new","equip","equipped","on_equipped","update_ammo_gui","play_animation","fire"}) do
                 local original=rawget(module,name)
                 if type(original)=="function" then
@@ -151,8 +151,8 @@ local function findWeaponObject(tool,now)
                 for index=1,64 do
                     local ok,first,second=pcall(single,value,index)
                     if not ok or (first==nil and second==nil) then break end
-                    -- Executor implementations return either the value alone,
-                    -- or Lua's (name, value) pair.
+
+
                     local item=second~=nil and second or first
                     found=inspect(item,depth-1); if found then return found end
                 end
@@ -170,9 +170,9 @@ local function findWeaponObject(tool,now)
             end
         end
     end
-    -- The controller may predate the menu and cache its equip/UI methods.
-    -- Read the existing input handlers instead of waiting for a first shot to
-    -- pass through the fire hook. Never fire signals or invoke these callbacks.
+
+
+
     local gui=player:FindFirstChildOfClass("PlayerGui")
     local mouseGui=gui and gui:FindFirstChild("Mouse")
     local mobile=mouseGui and mouseGui:FindFirstChild("Mobile Frame")
@@ -201,8 +201,8 @@ local function findWeaponObject(tool,now)
         local ok,objects=pcall(getgc,true)
         if not ok or type(objects)~="table" then ok,objects=pcall(getgc,false) end
         if ok and type(objects)=="table" then
-            -- Direct table results are checked before traversing function-only
-            -- results, which some mobile executors return even with true.
+
+
             for _,candidate in ipairs(objects) do found=accept(candidate); if found then return found end end
             seen={}; nodes=0; functions=0
             for _,candidate in ipairs(objects) do
@@ -426,7 +426,7 @@ local function equipPistol(c,h,now)
         aw.nextEquip=now+.5
         h:EquipTool(tool)
     elseif tool.Parent==c and not aw.objects[tool] and not aw.equipRefresh[tool] and now>=aw.nextEquip then
-        -- Hooks installed after an existing equip need one fresh equip event.
+
         aw.nextEquip=now+2
         aw.equipRefresh[tool]=true
         if backpack then h:UnequipTools(); h:EquipTool(tool) end
@@ -463,8 +463,8 @@ function SC.stepAutoWin(refresh)
         if aw.role then resetRole() end
         report("Waiting for round..."); return
     end
-    -- Resolve the already-created weapon while waiting for the round as well,
-    -- so the first detected Juggernaut does not need a manual trigger press.
+
+
     local now=os.clock()
     local tool,object
     if mine.Parent==survivors then

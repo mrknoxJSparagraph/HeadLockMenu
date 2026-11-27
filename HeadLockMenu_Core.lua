@@ -1826,9 +1826,159 @@ end
 SC.installTripFeatures()
 SC.installPAP()
 
--- INTEGRATED_VEHICLES_BEGIN
+
+function SC.installVehicleSync(ctx)
+return (function(ctx)
+local Http=ctx.Http
+local net={enabled=true,connected=false,vehicles={},records={},queue={},closed=false,pending=false,nextClaim=0}
+if type(ctx.endpoint)~='string' or not ctx.endpoint:match('^https://') then
+    net.enabled=false;net.error='Shared unavailable';return net
+end
+local send=type(request)=='function' and request or type(http_request)=='function' and http_request
+    or type(syn)=='table' and syn.request or type(http)=='table' and http.request
+if type(send)~='function' then net.enabled=false;net.error='Shared unavailable';return net end
+local function guid()return (Http:GenerateGUID(false):gsub('[{}%-]',''))end
+net.session=guid();local secret=guid()
+local room=tostring(game.PlaceId)..':'..tostring(game.JobId)
+if type(game.JobId)~='string' or #game.JobId<8 then net.enabled=false;net.error='Shared needs a live server';return net end
+local endpoint=ctx.endpoint
+local function rpc(op,fields)
+    local body={room=room,session=net.session,secret=secret,user=ctx.player.UserId,op=op}
+    for key,value in pairs(fields or {}) do body[key]=value end
+    local response=send({Url=endpoint,Method='POST',Headers={['Content-Type']='application/json'},Body=Http:JSONEncode(body),Timeout=4})
+    assert(type(response)=='table' and (response.StatusCode or response.Status)==200,'Shared connection unavailable')
+    local data=Http:JSONDecode(response.Body)
+    assert(type(data)=='table' and type(data.cars)=='table','Shared response unavailable')
+    return data
+end
+local function enqueue(op,v,fields)
+    table.insert(net.queue,{op=op,v=v,fields=fields or {id=v and v.netId}})
+end
+function net:isDriver(v)
+    return self.enabled and self.connected and not self.closed and v and v.networked and v.leaseUntil
+        and os.clock()<v.leaseUntil and v.netDriver==self.session and v.epoch~=nil
+end
+function net:attach(v,record)
+    self.vehicles[record.id]=v;v.netId=record.id;v.networked=true;v.published=true
+    v.netOwner=record.owner;v.netDriver=record.driver;v.epoch=record.epoch;v.netRecord=record
+end
+function net:register(v)
+    if not self.enabled or self.closed then return false end
+    v.netId=guid();v.networked=true;v.netOwner=self.session;v.published=false
+    self.vehicles[v.netId]=v
+    enqueue('spawn',v,{id=v.netId,kind=v.kind,pose=ctx.pose(v)})
+    return true
+end
+function net:claim(v)
+    if not self.enabled or self.closed or not self.connected or not v.published or self.pending
+        or ctx.current() or os.clock()<self.nextClaim then return end
+    self.nextClaim=os.clock()+.7
+    if v.netDriver and v.netDriver~=self.session then ctx.report('Occupied');return end
+    self.pending=true;enqueue('claim',v)
+end
+function net:release(v)
+    if not v or not v.networked then return end
+    local epoch=v.epoch
+    v.leaseUntil=0
+    if not self.closed then enqueue('release',v,{id=v.netId,epoch=epoch,pose=ctx.pose(v)}) end
+end
+function net:delete(v)
+    if not v or not v.networked then return false end
+    if v.netOwner~=self.session then ctx.report('Not your vehicle');return true end
+    if v.netDriver and v.netDriver~=self.session then ctx.report('Occupied');return true end
+    if not v.deleting then v.deleting=true;enqueue('delete',v)end
+    return true
+end
+function net:close()
+    if self.closed then return end
+    self.closed=true;self.connected=false
+    task.spawn(function()pcall(rpc,'leave')end)
+end
+local function receive(data)
+    local records={}
+    for _,record in ipairs(data.cars) do
+        if type(record)=='table' and type(record.id)=='string' and (record.kind=='Car' or record.kind=='Bike')
+            and type(record.cf)=='table' and #record.cf==12 then records[record.id]=record end
+    end
+    net.records=records
+    for id,v in pairs(net.vehicles) do
+        local record=records[id]
+        if record then
+            v.netOwner=record.owner;v.netDriver=record.driver;v.netRecord=record
+            if not ctx.current() or ctx.current()~=v then v.epoch=record.epoch end
+        elseif v.published then
+            net.vehicles[id]=nil;ctx.remove(v)
+        end
+    end
+    ctx.reconcile(records,net)
+end
+local function tick()
+    local item
+    if net.connected then item=table.remove(net.queue,1) end
+    local fields=item and item.fields or {}
+    local op=not net.connected and 'join' or item and item.op or 'sync'
+    local active=ctx.current()
+    local moving
+    if op=='sync' and net:isDriver(active) then
+        active.netSeq=(active.netSeq or 0)+1
+        moving={id=active.netId,epoch=active.epoch,seq=active.netSeq,pose=ctx.pose(active)}
+        fields={move=moving}
+    end
+    local started=os.clock()
+    local ok,data=pcall(rpc,op,fields)
+    if net.closed then return end
+    if not ok then
+        net.error=tostring(data)
+        if item then
+            if item.op=='claim' then net.pending=false end
+            if item.op=='delete' and item.v then item.v.deleting=false end
+            if item.op=='spawn' then table.insert(net.queue,item)end
+        end
+        ctx.report('Shared reconnecting')
+        net.connected=false
+        return
+    end
+    if op=='join' then net.connected=data.ok==true end
+    if data.error=='authorization' then net.connected=false end
+    if moving and active and data.ok and data.epoch==moving.epoch
+        and active.netId==moving.id and ctx.current()==active then active.leaseUntil=started+2 end
+    receive(data)
+    if item then
+        local v=item.v
+        if item.op=='spawn' then
+            if data.ok and net.records[v.netId] then v.published=true;ctx.report('Shared vehicle spawned')
+            else ctx.remove(v);net.vehicles[v.netId]=nil;ctx.report('Shared spawn failed')end
+        elseif item.op=='claim' then
+            net.pending=false
+            local record=v and net.records[v.netId]
+            if data.ok and record and record.driver==net.session and os.clock()<started+2
+                and not v.dead and not ctx.current() then
+                v.epoch=data.epoch;v.netSeq=0;v.leaseUntil=started+2;v.netDriver=net.session
+                if not ctx.enter(v)then net:release(v)end
+            elseif data.ok and record and record.driver==net.session then net:release(v)
+            else ctx.report(data.error=='occupied' and 'Occupied' or 'Seat unavailable')end
+        elseif item.op=='delete' and v then
+            v.deleting=false
+            if not data.ok then ctx.report(data.error=='occupied' and 'Occupied' or 'Delete unavailable')end
+        end
+    end
+end
+net.tick=tick
+if not ctx.manual then
+    task.spawn(function()
+        while not net.closed do
+            local ok,why=pcall(tick)
+            if not ok then net.connected=false;net.error=tostring(why);ctx.report('Shared reconnecting')end
+            task.wait(net.connected and .12 or 2)
+        end
+    end)
+end
+return net
+end)(ctx)
+end
+SC.vehicleRelayURL=""
 function SC.installVehicles()
- return (function(SC)
+return (function(SC)
 local Players=game:GetService('Players')
 local Run=game:GetService('RunService')
 local UIS=game:GetService('UserInputService')
@@ -1916,7 +2066,7 @@ end
 local sliderDrag=nil
 local closed=false
 local busy=false
-local exitRide,deleteVehicle
+local exitRide,deleteVehicle,net
 local function resetHeld()
     for name in pairs(held) do
         held[name]={}
@@ -2014,7 +2164,7 @@ end
 local function weld(a,b)
     local w=Instance.new('WeldConstraint'); w.Part0=a; w.Part1=b; w.Parent=b; return w
 end
--- Keep every player's avatar out of local vehicle collisions and ground probes.
+
 local trackedCharacters={}
 local function refreshGroundFilters()
     local exclusions={folder}
@@ -2077,11 +2227,19 @@ end)
 
 local function beginRide(v,c,h,r)
     if active or v.dead or api.paused then return end
+    if v.networked and (not net or not net:isDriver(v)) then
+        if net then net:claim(v)end
+        return
+    end
+    if (r.Position-v.seat.Position).Magnitude>7 then return end
+    v.hull.Anchored=false;v.balance.Enabled=true
+    local look=v.hull.CFrame.LookVector
+    v.heading=math.atan2(-look.X,-look.Z)
     if SC.autoWin and SC.autoWin.enabled then SC.setAutoWin(false) end
     SC.stopConflictingMovement()
     SC.gravity.enabled=false; SC.stopGravity()
-    -- The disabled Seat is only a contact trigger. It must never create a
-    -- SeatWeld, which merges the character with the client-only vehicle.
+
+
     v.seat.Disabled=true
     local stale=v.seat:FindFirstChild('SeatWeld')
     if stale then stale:Destroy() end
@@ -2093,9 +2251,9 @@ local function beginRide(v,c,h,r)
     local attachment=make('Attachment',r,{Name='GarageDriverAttachment'})
     local target=v.seat.CFrame*CFrame.new(0,v.seat.Size.Y/2+1.5,0)
     local mass=math.max(r.AssemblyMass,1)
-    -- OneAttachment mode uses a WORLD target, not an attachment on the car.
-    -- Neither this constraint nor the orientation constraint connects the
-    -- driver's physics mechanism to any client-created vehicle part.
+
+
+
     local follow=make('AlignPosition',r,{
         Name='GarageDriverFollow',Attachment0=attachment,
         Mode=Enum.PositionAlignmentMode.OneAttachment,Position=target.Position,
@@ -2121,9 +2279,11 @@ local function beginRide(v,c,h,r)
     end
     resetHeld()
     report('Driving '..v.kind..'. Jump exits. Character moves independently.')
+    return true
 end
 exitRide=function()
     local v=active; if not v then return end
+    if v.networked and net then net:release(v)end
     active=nil; resetHeld(); v.lastExit=os.clock()
     local driver=v.driver; v.driver=nil
     if driver then
@@ -2141,7 +2301,7 @@ exitRide=function()
     local constraints=v.driverConstraints; v.driverConstraints={}
     task.delay(.8,function()
         for _,n in ipairs(constraints) do n:Destroy() end
-        -- Keep the contact seat disabled: no native SeatWeld should be created.
+
     end)
     report('Exited. Walk onto any vehicle seat to drive.')
 end
@@ -2163,8 +2323,8 @@ local function bounds(entries,ref)
     return lo,hi
 end
 local function nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
--- Try only the nearest front/right/left/rear slots. Never grow
--- a serial grid that pushes later spawns away from the character.
+
+
 local right=Vector3.new(-yawLook.Z,0,yawLook.X)
 local ahead=math.max(5,extent.Z/2+3)
 local beside=math.max(4,extent.X/2+3)
@@ -2195,10 +2355,10 @@ end
 assert(spawnCF,'No clear space beside you. Move a few steps and try again.')
 return spawnCF,rp
 end
-local function newVehicle(kind)
-    if busy then return end
+local function newVehicle(kind,record)
+    if busy then return false end
     local c,h,r=character(); if not c then report('Spawn your character first.'); return end
-    busy=true; report('Loading '..kind..'…')
+    busy=true;if not record then report('Loading '..kind..'…')end
     task.spawn(function()
         local model
         local success,err=pcall(function()
@@ -2232,7 +2392,7 @@ local function newVehicle(kind)
                 if p:IsA('LuaSourceContainer') or p:IsA('JointInstance') or p:IsA('Constraint') or p:IsA('BodyMover') then p:Destroy() end
             end
             local lo,hi=bounds(visibleParts,ref); local extent=hi-lo
-            -- Preserve the downloaded geometry; classify only likely road wheels.
+
             local groups=kind=='Bike' and {{},{}} or {{},{},{},{}}
             local midZ=(lo.Z+hi.Z)/2
             local wheelSet={}
@@ -2262,15 +2422,21 @@ local function newVehicle(kind)
             local chassisRef=ref*CFrame.new(origin)
             local yawLook=r.CFrame.LookVector; yawLook=Vector3.new(yawLook.X,0,yawLook.Z)
             yawLook=yawLook.Magnitude>.01 and yawLook.Unit or Vector3.new(0,0,-1)
-            local spawnCF,rp=nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
+            local spawnCF,rp
+            if record then
+                assert(net and net.records[record.id],'Vehicle removed')
+                record=net.records[record.id]
+                spawnCF=CFrame.new(table.unpack(record.cf));yawLook=spawnCF.LookVector
+                rp=RaycastParams.new();rp.FilterType=Enum.RaycastFilterType.Exclude;rp.RespectCanCollide=true
+            else spawnCF,rp=nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)end
             local hull=make('Part',model,{Name='StableChassis',Size=Vector3.new(math.max(kind=='Bike' and 1.2 or 2.5,extent.X*.70),.8,math.max(3,extent.Z*.70)),
                 CFrame=spawnCF,Transparency=1,Anchored=true,CanCollide=true,CanTouch=false,RootPriority=-127,
                 CustomPhysicalProperties=PhysicalProperties.new(2,.15,0,100,100)})
             local v={model=model,hull=hull,kind=kind,wheels={},links={},driverConstraints={},lastExit=-10,
                 heading=math.atan2(-yawLook.X,-yawLook.Z),steer=0,dead=false,ray=rp,normal=UP}
             model.PrimaryPart=hull; model.Name='Local'..kind
-            -- Replace VehicleSeat with a passive Seat so the native mobile vehicle
-            -- controller never injects a competing throttle or steering signal.
+
+
             local seatCF=chassisRef:ToObjectSpace(sourceSeat.CFrame); local seatSize=sourceSeat.Size
             sourceSeat.Transparency=1; sourceSeat.CanTouch=false
             local seat=make('Seat',model,{Name='DriverSeat',Size=seatSize,CFrame=spawnCF*seatCF,
@@ -2301,6 +2467,10 @@ local function newVehicle(kind)
             model.Parent=folder
             for _,p in ipairs(model:GetDescendants()) do if p:IsA('BasePart') then p.Anchored=false end end
             table.insert(vehicles,v)
+            if net and net.enabled then
+                if record then net:attach(v,record)else net:register(v)end
+                hull.Anchored=true;v.balance.Enabled=false
+            end
             for c in pairs(trackedCharacters) do protectAvatar(v,c) end
             refreshGroundFilters()
             local function on(signal,fn) local connection=signal:Connect(fn); table.insert(v.links,connection) end
@@ -2310,25 +2480,69 @@ local function newVehicle(kind)
                 if (rr.Position-seat.Position).Magnitude>6 then return end
                 beginRide(v,cc,hh,rr)
             end)
-            report(kind..' spawned. '..#vehicles..' total. Walk onto its seat.')
+            if not record then report(v.networked and 'Sharing vehicle' or kind..' spawned. Local only.')end
         end)
         if not success then if model then model:Destroy() end; report('Load failed: '..string.sub(tostring(err),1,150)) end
         busy=false
     end)
+    return true
 end
-deleteVehicle=function(v)
+deleteVehicle=function(v,localOnly)
     if not v or v.dead then return end
+    if v.networked and net and not localOnly then
+        if active==v then exitRide()end
+        net:delete(v);return
+    end
     if active==v then exitRide() end
     v.dead=true
     for _,c in ipairs(v.links) do c:Disconnect() end
     v.model:Destroy()
     for i,item in ipairs(vehicles) do if item==v then table.remove(vehicles,i); break end end
 end
+local function vehiclePose(v)
+    local vel,av=v.hull.AssemblyLinearVelocity,v.hull.AssemblyAngularVelocity
+    return {cf={v.hull.CFrame:GetComponents()},vel={vel.X,vel.Y,vel.Z},av={av.X,av.Y,av.Z},
+        steer=v.steer,spin=v.wheels[1] and v.wheels[1].angle or 0}
+end
+local function reconcile(records,sync)
+    if closed then return end
+    if active and active.networked then
+        local state=records[active.netId]
+        if not state or state.driver~=sync.session or state.epoch~=active.epoch or not sync:isDriver(active) then exitRide()end
+    end
+    for id,state in pairs(records)do
+        local v=sync.vehicles[id]
+        if v then
+            if active~=v then
+                v.remoteCF=CFrame.new(table.unpack(state.cf));v.receivedAt=os.clock()
+                v.remoteVelocity=state.driver and Vector3.new(table.unpack(state.vel)) or ZERO
+                v.remoteSpin=state.spin or 0;v.remoteSteer=state.steer or 0
+            end
+        elseif not busy then newVehicle(state.kind,state)end
+    end
+end
+if SC.installVehicleSync then
+    net=SC.installVehicleSync({Http=Http,Run=Run,player=player,endpoint=SC.vehicleRelayURL,
+        current=function()return active end,pose=vehiclePose,report=report,reconcile=reconcile,
+        remove=function(v)deleteVehicle(v,true)end,
+        enter=function(v)
+            local c,h,r=character()
+            if not c or api.paused or closed or v.dead then return false end
+            return beginRide(v,c,h,r)
+        end})
+end
+local function deleteOwned()
+    local copy={}
+    for _,v in ipairs(vehicles)do table.insert(copy,v)end
+    for _,v in ipairs(copy)do
+        if not v.networked or not net or v.netOwner==net.session then deleteVehicle(v)end
+    end
+end
 local function longitudinalAcceleration(speed,gas,brake,driven)
     local target,rate=0,CONFIG.Coast
     if driven then
         if brake then
-            -- Holding BRAKE crosses smoothly through zero into reverse.
+
             target=-CONFIG.Reverse
             rate=speed>.15 and CONFIG.Brake or CONFIG.ReverseAcceleration
             if gas then target=0; rate=CONFIG.Brake end
@@ -2337,8 +2551,8 @@ local function longitudinalAcceleration(speed,gas,brake,driven)
             rate=speed<-.15 and CONFIG.Brake or CONFIG.Acceleration
         end
     else rate=CONFIG.Brake end
-    -- Acceleration is applied to actual measured speed immediately.
-    -- No target-speed ramp followed by a second slow response filter.
+
+
     local driveAcceleration=math.clamp((target-speed)*14,-rate,rate)
     return driveAcceleration
 end
@@ -2359,8 +2573,8 @@ local function sampleGround(v,wheel,origin)
     local extra=wheel.radius-probeRadius
     local hit=workspace:Spherecast(origin,probeRadius,-UP*(wheel.travel+extra),v.ray)
     if hit and hit.Normal.Y>.35 then return hit,hit.Distance-extra end
-    -- Spherecasts miss surfaces overlapping the starting sphere. A raised ray
-    -- keeps suspension support when a wheel is briefly compressed into a step.
+
+
     local raise=wheel.radius*1.25
     hit=workspace:Raycast(origin+UP*raise,-UP*(wheel.travel+raise+wheel.radius),v.ray)
     if hit and hit.Normal.Y>.35 then
@@ -2372,10 +2586,11 @@ local lastError=0
 listen(Run.PreSimulation,function(dt)
     dt=math.min(dt,.05)
     local cc,hh=character()
-    if active and (api.paused or not hh or active.driver.hum~=hh or (SC.autoWin and SC.autoWin.enabled)) then exitRide() end
+    if active and (api.paused or not hh or active.driver.hum~=hh or (SC.autoWin and SC.autoWin.enabled)
+        or active.networked and not net:isDriver(active)) then exitRide() end
     if active and hh then
-        -- Ignore the mobile walking stick while driving. Touch buttons supply
-        -- independent inputs, so native walking controls cannot fight the seat.
+
+
         hh:Move(ZERO,false)
         local v=active
         local driver=v.driver
@@ -2386,7 +2601,20 @@ listen(Run.PreSimulation,function(dt)
     end
     local gas,brake,turn=inputs()
     for _,v in ipairs(vehicles) do
-        if not v.dead and v.model.Parent then
+        if not v.dead and v.model.Parent and v.networked and active~=v then
+            v.hull.Anchored=true;v.balance.Enabled=false;v.drive.Force=ZERO
+            for _,wheel in ipairs(v.wheels)do wheel.force.Force=ZERO end
+            if v.remoteCF then
+                local target=v.remoteCF+(v.remoteVelocity or ZERO)*math.min(os.clock()-(v.receivedAt or os.clock()),.2)
+                local current=v.hull.CFrame
+                local nextCF=(current.Position-target.Position).Magnitude>25 and target or current:Lerp(target,1-math.exp(-18*dt))
+                v.model:PivotTo(nextCF)
+                for _,wheel in ipairs(v.wheels)do
+                    local steer=wheel.front and -(v.remoteSteer or 0)*math.rad(32)or 0
+                    for _,joint in ipairs(wheel.joints)do joint.Transform=CFrame.Angles(0,steer,0)*CFrame.Angles(v.remoteSpin or 0,0,0)end
+                end
+            end
+        elseif not v.dead and v.model.Parent then
             local success,err=pcall(function()
                 local hull=v.hull; local cf=hull.CFrame
                 local mass=hull.AssemblyMass
@@ -2412,8 +2640,8 @@ listen(Run.PreSimulation,function(dt)
                     else wheel.force.Force=ZERO end
                     wheel.height=wheel.height+(math.clamp(wheel.rest-distance,-1.2,1.2)-wheel.height)*(1-math.exp(-14*dt))
                     wheel.angle=(wheel.angle+speed/wheel.radius*dt)%(math.pi*2)
-                    -- The wheel hub has the vehicle's axes, so rotation is applied
-                    -- about its actual axle, independent of each mesh's orientation.
+
+
                     local steerAngle=wheel.front and -v.steer*math.rad(math.clamp(18+CONFIG.Turning*8,18,58))/(1+math.abs(speed)/140) or 0
                     for _,joint in ipairs(wheel.joints) do
                         joint.Transform=CFrame.new(0,wheel.height,0)*CFrame.Angles(0,steerAngle,0)*CFrame.Angles(wheel.angle,0,0)
@@ -2446,7 +2674,9 @@ listen(Run.PreSimulation,function(dt)
 end)
 function api.cleanup()
     if closed then return end
-    while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
+    exitRide()
+    if net and net.close then net:close()end
+    while #vehicles>0 do deleteVehicle(vehicles[#vehicles],true) end
     api.unmount()
     closed=true
     Run:UnbindFromRenderStep(cameraBinding)
@@ -2481,8 +2711,7 @@ function api.draw(container)
         deleteVehicle(active or vehicles[#vehicles]); report(#vehicles..' vehicles remaining.')
     end)
     menuButton('Delete All',114,124,108,function()
-        while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
-        report('All spawned vehicles deleted.')
+        deleteOwned()
     end)
     menuButton('Exit Vehicle',0,166,222,exitRide)
 local toggle
@@ -2502,7 +2731,7 @@ for index,spec in ipairs(settingSpecs) do
         BackgroundColor3=Color3.new(0,0,0),TextColor3=Color3.new(1,1,1),TextSize=12,Font=Enum.Font.Code,
         ClearTextOnFocus=false,Text='',ZIndex=8})
     round(entry)
-    -- A 34px touch target surrounds the thinner visible slider.
+
     local track=make('TextButton',body,{Name=spec.key..'Slider',Position=UDim2.fromOffset(4,y+24),Size=UDim2.new(1,-20,0,34),
         Text='',BackgroundTransparency=1,AutoButtonColor=false,Active=true,ZIndex=8})
     local rail=make('Frame',track,{Position=UDim2.fromScale(0,.4),Size=UDim2.fromScale(1,.2),BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,ZIndex=8})
@@ -2530,21 +2759,20 @@ for index,spec in ipairs(settingSpecs) do
 end
 
     status=make('TextLabel',body,{Name='VehicleStatus',Position=UDim2.fromOffset(0,754),Size=UDim2.new(1,-8,0,42),
-        BackgroundTransparency=1,Text=lastStatus,TextWrapped=true,TextSize=12,
+        BackgroundTransparency=1,Text=lastStatus..(net and not net.enabled and ' | '..net.error or ''),TextWrapped=true,TextSize=12,
         Font=Enum.Font.Code,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left})
 end
 api.spawn=newVehicle
 api.exit=exitRide
-api.deleteAll=function() while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end end
+api.deleteAll=deleteOwned
 api.settings=CONFIG
+api.sync=net
 _G.VehicleGarageCleanup=api.cleanup
 SC.vehicles=api
 return api
 
 end)(SC)
 end
--- INTEGRATED_VEHICLES_END
--- INTEGRATED_AUTOWIN_BEGIN
 (function(SC,ctx)
 local Players,Run,player=ctx.Players,ctx.Run,ctx.player
 local aw=SC.autoWin
@@ -2613,8 +2841,8 @@ local function captureWeaponMethods()
         if ok and type(module)=="table" and not loaded[module] then
             loaded[module]=true
             aw.modules[module]=true
-            -- Observe methods the equipped weapon already calls. Preserve their
-            -- original arguments/return values, including constructor results.
+
+
             for _,name in ipairs({"new","equip","equipped","on_equipped","update_ammo_gui","play_animation","fire"}) do
                 local original=rawget(module,name)
                 if type(original)=="function" then
@@ -2697,8 +2925,8 @@ local function findWeaponObject(tool,now)
                 for index=1,64 do
                     local ok,first,second=pcall(single,value,index)
                     if not ok or (first==nil and second==nil) then break end
-                    -- Executor implementations return either the value alone,
-                    -- or Lua's (name, value) pair.
+
+
                     local item=second~=nil and second or first
                     found=inspect(item,depth-1); if found then return found end
                 end
@@ -2716,9 +2944,9 @@ local function findWeaponObject(tool,now)
             end
         end
     end
-    -- The controller may predate the menu and cache its equip/UI methods.
-    -- Read the existing input handlers instead of waiting for a first shot to
-    -- pass through the fire hook. Never fire signals or invoke these callbacks.
+
+
+
     local gui=player:FindFirstChildOfClass("PlayerGui")
     local mouseGui=gui and gui:FindFirstChild("Mouse")
     local mobile=mouseGui and mouseGui:FindFirstChild("Mobile Frame")
@@ -2747,8 +2975,8 @@ local function findWeaponObject(tool,now)
         local ok,objects=pcall(getgc,true)
         if not ok or type(objects)~="table" then ok,objects=pcall(getgc,false) end
         if ok and type(objects)=="table" then
-            -- Direct table results are checked before traversing function-only
-            -- results, which some mobile executors return even with true.
+
+
             for _,candidate in ipairs(objects) do found=accept(candidate); if found then return found end end
             seen={}; nodes=0; functions=0
             for _,candidate in ipairs(objects) do
@@ -2972,7 +3200,7 @@ local function equipPistol(c,h,now)
         aw.nextEquip=now+.5
         h:EquipTool(tool)
     elseif tool.Parent==c and not aw.objects[tool] and not aw.equipRefresh[tool] and now>=aw.nextEquip then
-        -- Hooks installed after an existing equip need one fresh equip event.
+
         aw.nextEquip=now+2
         aw.equipRefresh[tool]=true
         if backpack then h:UnequipTools(); h:EquipTool(tool) end
@@ -3009,8 +3237,8 @@ function SC.stepAutoWin(refresh)
         if aw.role then resetRole() end
         report("Waiting for round..."); return
     end
-    -- Resolve the already-created weapon while waiting for the round as well,
-    -- so the first detected Juggernaut does not need a manual trigger press.
+
+
     local now=os.clock()
     local tool,object
     if mine.Parent==survivors then
@@ -3222,7 +3450,7 @@ end)(SC,{Players=Players,Run=RS,player=player,connect=connect,make=make,button=t
  stopMovement=SC.stopConflictingMovement,stopFly=stopCFly,startFly=startCFly,
  ensureFire=ensureFireHook,ensureRecoil=ensureNoRecoilHook,ensureSpread=ensureNoSpreadHook,
  updateJuggernaut=updateJuggernaut,getJuggernaut=function()return juggernautPlayer end})
--- INTEGRATED_AUTOWIN_END
+
 addCategory("Vehicles",function(panel)
  local ok,reason=pcall(function()
   if not SC.vehicles then SC.installVehicles()end
@@ -3237,7 +3465,7 @@ function SC.refreshOwnerCategories()
  end
 end
 SC.refreshOwnerCategories()
-_G.HeadLockMenuVersion="2026-11-26-autowin-public-owner-safe"
+_G.HeadLockMenuVersion="2026-11-26-vehicles-sync-prepared"
 
 SC.watchOwnerEmotes()
 

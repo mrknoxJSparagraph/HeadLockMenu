@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "build": "python3 scripts/embed_integrations.py",
-    "test": "node tests/integrations.mjs && node tests/regressions.mjs",
+    "test": "python3 tests/comment_stripping.py && node tests/vehicle_sync.mjs && node tests/integrations.mjs && node tests/regressions.mjs",
     "test:physics": "python3 tests/run_vehicle_physics.py"
   },
   "devDependencies": {

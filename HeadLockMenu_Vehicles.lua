@@ -1,4 +1,4 @@
--- Integrated vehicle installer; embedded in the core at build time.
+
 return function(SC)
 local Players=game:GetService('Players')
 local Run=game:GetService('RunService')
@@ -87,7 +87,7 @@ end
 local sliderDrag=nil
 local closed=false
 local busy=false
-local exitRide,deleteVehicle
+local exitRide,deleteVehicle,net
 local function resetHeld()
     for name in pairs(held) do
         held[name]={}
@@ -185,7 +185,7 @@ end
 local function weld(a,b)
     local w=Instance.new('WeldConstraint'); w.Part0=a; w.Part1=b; w.Parent=b; return w
 end
--- Keep every player's avatar out of local vehicle collisions and ground probes.
+
 local trackedCharacters={}
 local function refreshGroundFilters()
     local exclusions={folder}
@@ -248,11 +248,19 @@ end)
 
 local function beginRide(v,c,h,r)
     if active or v.dead or api.paused then return end
+    if v.networked and (not net or not net:isDriver(v)) then
+        if net then net:claim(v)end
+        return
+    end
+    if (r.Position-v.seat.Position).Magnitude>7 then return end
+    v.hull.Anchored=false;v.balance.Enabled=true
+    local look=v.hull.CFrame.LookVector
+    v.heading=math.atan2(-look.X,-look.Z)
     if SC.autoWin and SC.autoWin.enabled then SC.setAutoWin(false) end
     SC.stopConflictingMovement()
     SC.gravity.enabled=false; SC.stopGravity()
-    -- The disabled Seat is only a contact trigger. It must never create a
-    -- SeatWeld, which merges the character with the client-only vehicle.
+
+
     v.seat.Disabled=true
     local stale=v.seat:FindFirstChild('SeatWeld')
     if stale then stale:Destroy() end
@@ -264,9 +272,9 @@ local function beginRide(v,c,h,r)
     local attachment=make('Attachment',r,{Name='GarageDriverAttachment'})
     local target=v.seat.CFrame*CFrame.new(0,v.seat.Size.Y/2+1.5,0)
     local mass=math.max(r.AssemblyMass,1)
-    -- OneAttachment mode uses a WORLD target, not an attachment on the car.
-    -- Neither this constraint nor the orientation constraint connects the
-    -- driver's physics mechanism to any client-created vehicle part.
+
+
+
     local follow=make('AlignPosition',r,{
         Name='GarageDriverFollow',Attachment0=attachment,
         Mode=Enum.PositionAlignmentMode.OneAttachment,Position=target.Position,
@@ -292,9 +300,11 @@ local function beginRide(v,c,h,r)
     end
     resetHeld()
     report('Driving '..v.kind..'. Jump exits. Character moves independently.')
+    return true
 end
 exitRide=function()
     local v=active; if not v then return end
+    if v.networked and net then net:release(v)end
     active=nil; resetHeld(); v.lastExit=os.clock()
     local driver=v.driver; v.driver=nil
     if driver then
@@ -312,7 +322,7 @@ exitRide=function()
     local constraints=v.driverConstraints; v.driverConstraints={}
     task.delay(.8,function()
         for _,n in ipairs(constraints) do n:Destroy() end
-        -- Keep the contact seat disabled: no native SeatWeld should be created.
+
     end)
     report('Exited. Walk onto any vehicle seat to drive.')
 end
@@ -334,8 +344,8 @@ local function bounds(entries,ref)
     return lo,hi
 end
 local function nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
--- Try only the nearest front/right/left/rear slots. Never grow
--- a serial grid that pushes later spawns away from the character.
+
+
 local right=Vector3.new(-yawLook.Z,0,yawLook.X)
 local ahead=math.max(5,extent.Z/2+3)
 local beside=math.max(4,extent.X/2+3)
@@ -366,10 +376,10 @@ end
 assert(spawnCF,'No clear space beside you. Move a few steps and try again.')
 return spawnCF,rp
 end
-local function newVehicle(kind)
-    if busy then return end
+local function newVehicle(kind,record)
+    if busy then return false end
     local c,h,r=character(); if not c then report('Spawn your character first.'); return end
-    busy=true; report('Loading '..kind..'…')
+    busy=true;if not record then report('Loading '..kind..'…')end
     task.spawn(function()
         local model
         local success,err=pcall(function()
@@ -403,7 +413,7 @@ local function newVehicle(kind)
                 if p:IsA('LuaSourceContainer') or p:IsA('JointInstance') or p:IsA('Constraint') or p:IsA('BodyMover') then p:Destroy() end
             end
             local lo,hi=bounds(visibleParts,ref); local extent=hi-lo
-            -- Preserve the downloaded geometry; classify only likely road wheels.
+
             local groups=kind=='Bike' and {{},{}} or {{},{},{},{}}
             local midZ=(lo.Z+hi.Z)/2
             local wheelSet={}
@@ -433,15 +443,21 @@ local function newVehicle(kind)
             local chassisRef=ref*CFrame.new(origin)
             local yawLook=r.CFrame.LookVector; yawLook=Vector3.new(yawLook.X,0,yawLook.Z)
             yawLook=yawLook.Magnitude>.01 and yawLook.Unit or Vector3.new(0,0,-1)
-            local spawnCF,rp=nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)
+            local spawnCF,rp
+            if record then
+                assert(net and net.records[record.id],'Vehicle removed')
+                record=net.records[record.id]
+                spawnCF=CFrame.new(table.unpack(record.cf));yawLook=spawnCF.LookVector
+                rp=RaycastParams.new();rp.FilterType=Enum.RaycastFilterType.Exclude;rp.RespectCanCollide=true
+            else spawnCF,rp=nearbySpawn(c,r,extent,averageRadius,lo,hi,origin,yawLook)end
             local hull=make('Part',model,{Name='StableChassis',Size=Vector3.new(math.max(kind=='Bike' and 1.2 or 2.5,extent.X*.70),.8,math.max(3,extent.Z*.70)),
                 CFrame=spawnCF,Transparency=1,Anchored=true,CanCollide=true,CanTouch=false,RootPriority=-127,
                 CustomPhysicalProperties=PhysicalProperties.new(2,.15,0,100,100)})
             local v={model=model,hull=hull,kind=kind,wheels={},links={},driverConstraints={},lastExit=-10,
                 heading=math.atan2(-yawLook.X,-yawLook.Z),steer=0,dead=false,ray=rp,normal=UP}
             model.PrimaryPart=hull; model.Name='Local'..kind
-            -- Replace VehicleSeat with a passive Seat so the native mobile vehicle
-            -- controller never injects a competing throttle or steering signal.
+
+
             local seatCF=chassisRef:ToObjectSpace(sourceSeat.CFrame); local seatSize=sourceSeat.Size
             sourceSeat.Transparency=1; sourceSeat.CanTouch=false
             local seat=make('Seat',model,{Name='DriverSeat',Size=seatSize,CFrame=spawnCF*seatCF,
@@ -472,6 +488,10 @@ local function newVehicle(kind)
             model.Parent=folder
             for _,p in ipairs(model:GetDescendants()) do if p:IsA('BasePart') then p.Anchored=false end end
             table.insert(vehicles,v)
+            if net and net.enabled then
+                if record then net:attach(v,record)else net:register(v)end
+                hull.Anchored=true;v.balance.Enabled=false
+            end
             for c in pairs(trackedCharacters) do protectAvatar(v,c) end
             refreshGroundFilters()
             local function on(signal,fn) local connection=signal:Connect(fn); table.insert(v.links,connection) end
@@ -481,25 +501,69 @@ local function newVehicle(kind)
                 if (rr.Position-seat.Position).Magnitude>6 then return end
                 beginRide(v,cc,hh,rr)
             end)
-            report(kind..' spawned. '..#vehicles..' total. Walk onto its seat.')
+            if not record then report(v.networked and 'Sharing vehicle' or kind..' spawned. Local only.')end
         end)
         if not success then if model then model:Destroy() end; report('Load failed: '..string.sub(tostring(err),1,150)) end
         busy=false
     end)
+    return true
 end
-deleteVehicle=function(v)
+deleteVehicle=function(v,localOnly)
     if not v or v.dead then return end
+    if v.networked and net and not localOnly then
+        if active==v then exitRide()end
+        net:delete(v);return
+    end
     if active==v then exitRide() end
     v.dead=true
     for _,c in ipairs(v.links) do c:Disconnect() end
     v.model:Destroy()
     for i,item in ipairs(vehicles) do if item==v then table.remove(vehicles,i); break end end
 end
+local function vehiclePose(v)
+    local vel,av=v.hull.AssemblyLinearVelocity,v.hull.AssemblyAngularVelocity
+    return {cf={v.hull.CFrame:GetComponents()},vel={vel.X,vel.Y,vel.Z},av={av.X,av.Y,av.Z},
+        steer=v.steer,spin=v.wheels[1] and v.wheels[1].angle or 0}
+end
+local function reconcile(records,sync)
+    if closed then return end
+    if active and active.networked then
+        local state=records[active.netId]
+        if not state or state.driver~=sync.session or state.epoch~=active.epoch or not sync:isDriver(active) then exitRide()end
+    end
+    for id,state in pairs(records)do
+        local v=sync.vehicles[id]
+        if v then
+            if active~=v then
+                v.remoteCF=CFrame.new(table.unpack(state.cf));v.receivedAt=os.clock()
+                v.remoteVelocity=state.driver and Vector3.new(table.unpack(state.vel)) or ZERO
+                v.remoteSpin=state.spin or 0;v.remoteSteer=state.steer or 0
+            end
+        elseif not busy then newVehicle(state.kind,state)end
+    end
+end
+if SC.installVehicleSync then
+    net=SC.installVehicleSync({Http=Http,Run=Run,player=player,endpoint=SC.vehicleRelayURL,
+        current=function()return active end,pose=vehiclePose,report=report,reconcile=reconcile,
+        remove=function(v)deleteVehicle(v,true)end,
+        enter=function(v)
+            local c,h,r=character()
+            if not c or api.paused or closed or v.dead then return false end
+            return beginRide(v,c,h,r)
+        end})
+end
+local function deleteOwned()
+    local copy={}
+    for _,v in ipairs(vehicles)do table.insert(copy,v)end
+    for _,v in ipairs(copy)do
+        if not v.networked or not net or v.netOwner==net.session then deleteVehicle(v)end
+    end
+end
 local function longitudinalAcceleration(speed,gas,brake,driven)
     local target,rate=0,CONFIG.Coast
     if driven then
         if brake then
-            -- Holding BRAKE crosses smoothly through zero into reverse.
+
             target=-CONFIG.Reverse
             rate=speed>.15 and CONFIG.Brake or CONFIG.ReverseAcceleration
             if gas then target=0; rate=CONFIG.Brake end
@@ -508,8 +572,8 @@ local function longitudinalAcceleration(speed,gas,brake,driven)
             rate=speed<-.15 and CONFIG.Brake or CONFIG.Acceleration
         end
     else rate=CONFIG.Brake end
-    -- Acceleration is applied to actual measured speed immediately.
-    -- No target-speed ramp followed by a second slow response filter.
+
+
     local driveAcceleration=math.clamp((target-speed)*14,-rate,rate)
     return driveAcceleration
 end
@@ -530,8 +594,8 @@ local function sampleGround(v,wheel,origin)
     local extra=wheel.radius-probeRadius
     local hit=workspace:Spherecast(origin,probeRadius,-UP*(wheel.travel+extra),v.ray)
     if hit and hit.Normal.Y>.35 then return hit,hit.Distance-extra end
-    -- Spherecasts miss surfaces overlapping the starting sphere. A raised ray
-    -- keeps suspension support when a wheel is briefly compressed into a step.
+
+
     local raise=wheel.radius*1.25
     hit=workspace:Raycast(origin+UP*raise,-UP*(wheel.travel+raise+wheel.radius),v.ray)
     if hit and hit.Normal.Y>.35 then
@@ -543,10 +607,11 @@ local lastError=0
 listen(Run.PreSimulation,function(dt)
     dt=math.min(dt,.05)
     local cc,hh=character()
-    if active and (api.paused or not hh or active.driver.hum~=hh or (SC.autoWin and SC.autoWin.enabled)) then exitRide() end
+    if active and (api.paused or not hh or active.driver.hum~=hh or (SC.autoWin and SC.autoWin.enabled)
+        or active.networked and not net:isDriver(active)) then exitRide() end
     if active and hh then
-        -- Ignore the mobile walking stick while driving. Touch buttons supply
-        -- independent inputs, so native walking controls cannot fight the seat.
+
+
         hh:Move(ZERO,false)
         local v=active
         local driver=v.driver
@@ -557,7 +622,20 @@ listen(Run.PreSimulation,function(dt)
     end
     local gas,brake,turn=inputs()
     for _,v in ipairs(vehicles) do
-        if not v.dead and v.model.Parent then
+        if not v.dead and v.model.Parent and v.networked and active~=v then
+            v.hull.Anchored=true;v.balance.Enabled=false;v.drive.Force=ZERO
+            for _,wheel in ipairs(v.wheels)do wheel.force.Force=ZERO end
+            if v.remoteCF then
+                local target=v.remoteCF+(v.remoteVelocity or ZERO)*math.min(os.clock()-(v.receivedAt or os.clock()),.2)
+                local current=v.hull.CFrame
+                local nextCF=(current.Position-target.Position).Magnitude>25 and target or current:Lerp(target,1-math.exp(-18*dt))
+                v.model:PivotTo(nextCF)
+                for _,wheel in ipairs(v.wheels)do
+                    local steer=wheel.front and -(v.remoteSteer or 0)*math.rad(32)or 0
+                    for _,joint in ipairs(wheel.joints)do joint.Transform=CFrame.Angles(0,steer,0)*CFrame.Angles(v.remoteSpin or 0,0,0)end
+                end
+            end
+        elseif not v.dead and v.model.Parent then
             local success,err=pcall(function()
                 local hull=v.hull; local cf=hull.CFrame
                 local mass=hull.AssemblyMass
@@ -583,8 +661,8 @@ listen(Run.PreSimulation,function(dt)
                     else wheel.force.Force=ZERO end
                     wheel.height=wheel.height+(math.clamp(wheel.rest-distance,-1.2,1.2)-wheel.height)*(1-math.exp(-14*dt))
                     wheel.angle=(wheel.angle+speed/wheel.radius*dt)%(math.pi*2)
-                    -- The wheel hub has the vehicle's axes, so rotation is applied
-                    -- about its actual axle, independent of each mesh's orientation.
+
+
                     local steerAngle=wheel.front and -v.steer*math.rad(math.clamp(18+CONFIG.Turning*8,18,58))/(1+math.abs(speed)/140) or 0
                     for _,joint in ipairs(wheel.joints) do
                         joint.Transform=CFrame.new(0,wheel.height,0)*CFrame.Angles(0,steerAngle,0)*CFrame.Angles(wheel.angle,0,0)
@@ -617,7 +695,9 @@ listen(Run.PreSimulation,function(dt)
 end)
 function api.cleanup()
     if closed then return end
-    while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
+    exitRide()
+    if net and net.close then net:close()end
+    while #vehicles>0 do deleteVehicle(vehicles[#vehicles],true) end
     api.unmount()
     closed=true
     Run:UnbindFromRenderStep(cameraBinding)
@@ -652,8 +732,7 @@ function api.draw(container)
         deleteVehicle(active or vehicles[#vehicles]); report(#vehicles..' vehicles remaining.')
     end)
     menuButton('Delete All',114,124,108,function()
-        while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end
-        report('All spawned vehicles deleted.')
+        deleteOwned()
     end)
     menuButton('Exit Vehicle',0,166,222,exitRide)
 local toggle
@@ -673,7 +752,7 @@ for index,spec in ipairs(settingSpecs) do
         BackgroundColor3=Color3.new(0,0,0),TextColor3=Color3.new(1,1,1),TextSize=12,Font=Enum.Font.Code,
         ClearTextOnFocus=false,Text='',ZIndex=8})
     round(entry)
-    -- A 34px touch target surrounds the thinner visible slider.
+
     local track=make('TextButton',body,{Name=spec.key..'Slider',Position=UDim2.fromOffset(4,y+24),Size=UDim2.new(1,-20,0,34),
         Text='',BackgroundTransparency=1,AutoButtonColor=false,Active=true,ZIndex=8})
     local rail=make('Frame',track,{Position=UDim2.fromScale(0,.4),Size=UDim2.fromScale(1,.2),BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0,ZIndex=8})
@@ -701,13 +780,14 @@ for index,spec in ipairs(settingSpecs) do
 end
 
     status=make('TextLabel',body,{Name='VehicleStatus',Position=UDim2.fromOffset(0,754),Size=UDim2.new(1,-8,0,42),
-        BackgroundTransparency=1,Text=lastStatus,TextWrapped=true,TextSize=12,
+        BackgroundTransparency=1,Text=lastStatus..(net and not net.enabled and ' | '..net.error or ''),TextWrapped=true,TextSize=12,
         Font=Enum.Font.Code,TextColor3=Color3.new(1,1,1),TextXAlignment=Enum.TextXAlignment.Left})
 end
 api.spawn=newVehicle
 api.exit=exitRide
-api.deleteAll=function() while #vehicles>0 do deleteVehicle(vehicles[#vehicles]) end end
+api.deleteAll=deleteOwned
 api.settings=CONFIG
+api.sync=net
 _G.VehicleGarageCleanup=api.cleanup
 SC.vehicles=api
 return api
