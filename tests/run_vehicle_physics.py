@@ -1,4 +1,3 @@
-"""Run the vehicle's real callbacks in a Lua 5.4 mock host (liblua5.4)."""
 from pathlib import Path
 import ctypes
 import ctypes.util

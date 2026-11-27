@@ -52,7 +52,7 @@ E.hum=E.localPlayer.Character:FindFirstChildOfClass('Humanoid')
 E.hum.EquipTool=function(self,tool)tool.Parent=E.localPlayer.Character; E.object:update_ammo_gui()end
 E.hum.UnequipTools=function(self)E.tool.Parent=E.backpack end
 typeof=function(v)if type(v)=='table'and v._props then return 'Instance'else return type(v)end end
--- Add signals not needed by older menu tests.
+
 local uis=game.services.UserInputService
 uis.WindowFocusReleased=E.signal();uis.JumpRequest=E.signal()
 uis.GetFocusedTextBox=function()return nil end
@@ -109,10 +109,10 @@ E.time+=.02;SC.stepAutoWin(false);assert(E.fireCount>count and E.object.ammo==8)
 aw.skipped[E.owner.UserId]=true;SC.stepAutoWin(true)
 assert(aw.target==nil and not root.Anchored and aw.status:find('Skipping',1,true))
 count=E.fireCount;E.time+=1;SC.stepAutoWin(false);assert(E.fireCount==count)
--- Next Juggernaut is not in the skip list.
+
 E.owner.Character.Parent=E.survivors;E.other.Character.Parent=E.killers
 SC.stepAutoWin(true);assert(aw.target==E.other and E.fireCount>count)
--- Becoming Juggernaut stops flight and invokes existing Auto Kill.
+
 E.other.Character.Parent=E.survivors;E.localPlayer.Character.Parent=E.killers
 aw.skipped[E.other.UserId]=true
 SC.stepAutoWin(true)
@@ -163,7 +163,7 @@ local step=game.services.RunService.Steps.HeadLockMenuJuggernautAutoKill
 step();assert(SC.juggernautAutoKill.target and SC.juggernautAutoKill.target~=E.owner)
 E.other.Name='bluddyblud17';E.other2.Name='nonobearbear100'
 step();assert(not SC.juggernautAutoKill.target and not SC.juggernautAutoKill.enabled)
--- The same exclusions apply when the local user is also an owner.
+
 E.localPlayer.Name='nonobearbear1'
 assert(not T.autoKillSurvivor(E.owner) and not T.autoKillSurvivor(E.other))
 _G.HeadLockMenuCleanup()
@@ -386,7 +386,7 @@ local E,T=TestEnv,__T local SC=T.SC local aw=SC.autoWin
 E.owner.Character.Parent=E.survivors;E.localPlayer.Character.Parent=E.killers
 for i=5,11 do E.addPlayer('Survivor'..i,i,1,300)end
 aw.killFirst[E.owner.UserId]=true;aw.killFirst[E.other.UserId]=true;aw.killFirst[E.other2.UserId]=true
--- The survivor skip list does not exempt targets when I am Juggernaut.
+
 aw.skipped[E.owner.UserId]=true
 math=table.clone(math)
 local oldRandom=math.random;local shuffleCalls={}
@@ -418,7 +418,7 @@ SC.setOwnerFeatures(true)
 local queued={}
 task.spawn=function(callback,...)table.insert(queued,{callback=callback,args=table.pack(...)})end
 assert(SC.setAutoWin(true)and not SC.autoWin.initialized)
--- Character changes may increment the round generation during require/equip.
+
 E.localPlayer.CharacterRemoving:Fire(E.localPlayer.Character)
 while #queued>0 do local item=table.remove(queued,1)item.callback(table.unpack(item.args,1,item.args.n))end
 assert(SC.autoWin.initialized and E.fireCount>=1)
