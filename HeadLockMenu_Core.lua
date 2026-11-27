@@ -38,14 +38,13 @@ local trackTargetY=nil local trackTargetRising=false local followContactRoot=nil
 SC.autoWin={enabled=false,role=nil,target=nil}
 function SC.autoWinCombat()
  local aw=SC.autoWin
- if not aw.enabled or aw.role~="survivor" or not aw.target or SC.paused or SC.closing or not SC.ownerFeatures then return false end
+ if not aw.enabled or aw.role~="survivor" or not SC.canSelectPlayer(aw.target) or SC.paused or SC.closing then return false end
  local c=aw.target.Character local h=c and c:FindFirstChildOfClass("Humanoid")
  return aw.target.Parent==Players and not aw.skipped[aw.target.UserId] and c and c.Parent==workspace:FindFirstChild("Killers") and h and h.Health>0
 end
 function SC.rapidFireMax()return SC.ownerFeatures and SC.isOwnerAccount(player)and 1000 or 200 end
 function SC.setOwnerFeatures(value)
  SC.ownerFeatures=value==true and SC.isOwnerAccount(player)
- if not SC.ownerFeatures and SC.setAutoWin then SC.setAutoWin(false)end
  SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())
  if SC.refreshOwnerCategories then SC.refreshOwnerCategories()end
 end
@@ -375,8 +374,7 @@ if otherHumanoid.Health<=0 then autoTrack.excluded[candidate]=true else local di
 nearest,nearestDistance=candidate,distance end end end end end if nearest then autoTrack.lockTarget(nearest)end end local categoryButtons={}local categoryEntries={}local selectedCategories={}local categoryConnections={}
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
 button.Name="Category_"..name button.LayoutOrder=#categoryEntries+1
-button.Text="  "..name button.Visible=section==SC.activeGame and(name~="AutoWin" or(SC.ownerFeatures and SC.isOwnerAccount(player))) table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section,name=name})local function selectCategory()
-if name=="AutoWin" and not(SC.ownerFeatures and SC.isOwnerAccount(player))then return end
+button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section,name=name})local function selectCategory()
 SC.selectedCategory=name
 if SC.vehicles then SC.vehicles.unmount()end
 if SC.autoWin then SC.autoWin.update=nil SC.autoWin.refreshPlayers=nil end
@@ -682,9 +680,7 @@ s.offset=r.CFrame:ToObjectSpace(c:GetPivot())
 return true
 end
 local function autoKillSurvivor(target)
-local auto=SC.autoWin.enabled and SC.autoWin.role=="juggernaut"
-if auto then if not target or target==player or target.Parent~=Players then return end
-elseif not SC.canSelectPlayer(target)then return end local active=workspace:FindFirstChild("Characters to kill")local model=target and target.Character local h=model and model:FindFirstChildOfClass("Humanoid")
+if not SC.canSelectPlayer(target)then return end local active=workspace:FindFirstChild("Characters to kill")local model=target and target.Character local h=model and model:FindFirstChildOfClass("Humanoid")
 local head=model and model:FindFirstChild("Head")local root=model and model:FindFirstChild("HumanoidRootPart")if active and model and model.Parent==active and h and h.Health>0
 and head and root and root.Position.Y<SC.combatYLimit and not model:FindFirstChildOfClass("ForceField")then return model,head,root end end addCategory("Juggernaut",function(panel)
 make("TextLabel",{Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,Text="Juggernaut",TextColor3=WHITE,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
@@ -2923,7 +2919,7 @@ local function followTarget(c,h,r,targetRoot)
     SC.followJugPosition(c,targetRoot)
 end
 function SC.setAutoWin(value)
-    value=value==true and SC.ownerFeatures and SC.isOwnerAccount(player) and not SC.paused and not SC.closing
+    value=value==true and not SC.paused and not SC.closing
     if value==aw.enabled then return value end
     aw.session=(aw.session or 0)+1
     aw.enabled=value; resetRole()
@@ -3003,7 +2999,7 @@ function aw.chooseFirst(eligible,current)
 end
 function SC.stepAutoWin(refresh)
     if not aw.enabled or not aw.initialized then return end
-    if SC.paused or SC.closing or not SC.ownerFeatures or not SC.isOwnerAccount(player) then SC.setAutoWin(false); return end
+    if SC.paused or SC.closing then SC.setAutoWin(false); return end
     if refresh then ctx.updateJuggernaut() end
     local killers=workspace:FindFirstChild("Killers")
     local survivors=workspace:FindFirstChild("Characters to kill")
@@ -3030,9 +3026,10 @@ function SC.stepAutoWin(refresh)
         report("Juggernaut: Auto Kill ON"); return
     end
     local model,_,targetRoot=living(target,killers)
-    if not model or target==player or mine.Parent~=survivors or aw.skipped[target.UserId] then
+    if not model or not SC.canSelectPlayer(target) or mine.Parent~=survivors or aw.skipped[target.UserId] then
         if aw.role then resetRole() end
-        report(model and aw.skipped[target.UserId] and ("Skipping "..target.Name) or "Waiting for Juggernaut...")
+        report(model and SC.isOwnerAccount(target) and ("Skipping owner "..target.Name)
+            or model and aw.skipped[target.UserId] and ("Skipping "..target.Name) or "Waiting for Juggernaut...")
         return
     end
     if aw.role~="survivor" or aw.target~=target then
@@ -3055,7 +3052,8 @@ function SC.stepAutoWin(refresh)
     aw.nextShot=now+.003; aw.firing=true
     task.spawn(function()
         local ok,reason=pcall(function()
-            if not aw.enabled or aw.generation~=generation or tool.Parent~=player.Character or aw.skipped[target.UserId] then return end
+            if not aw.enabled or aw.generation~=generation or tool.Parent~=player.Character
+                or not SC.canSelectPlayer(target) or not SC.autoWinCombat() or aw.skipped[target.UserId] then return end
             local args=aw.arguments[tool] or table.pack()
             assert(type(object.fire)=="function","M1911 firing method unavailable")
             local head=model:FindFirstChild("Head") or targetRoot
@@ -3235,12 +3233,11 @@ end)
 addCategory("AutoWin",SC.autoWin.draw)
 function SC.refreshOwnerCategories()
  for _,entry in ipairs(categoryEntries)do
-  entry.button.Visible=entry.section==SC.activeGame and(entry.name~="AutoWin"or(SC.ownerFeatures and SC.isOwnerAccount(player)))
+  entry.button.Visible=entry.section==SC.activeGame
  end
- if SC.selectedCategory=="AutoWin"and not SC.ownerFeatures then SC.selectCredits()end
 end
 SC.refreshOwnerCategories()
-_G.HeadLockMenuVersion="2026-11-26-autowin-normal-trigger"
+_G.HeadLockMenuVersion="2026-11-26-autowin-public-owner-safe"
 
 SC.watchOwnerEmotes()
 

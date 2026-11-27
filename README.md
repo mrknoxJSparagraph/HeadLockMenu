@@ -14,9 +14,11 @@ follow constraints, touch layout, suspension probes and avatar collision
 exclusions. It tries nearby front/right/left/rear spawn slots and reports
 when all are occupied. Imported model scripts are removed before parenting.
 
-AutoWin is hidden until an owner enables the Credits checkbox. Its flight,
+AutoWin is visible at the bottom for every account without the Credits checkbox. Its flight,
 weapon overrides and survivor skip list are independent of the manual
-C Fly and weapon toggles. Local Juggernaut Auto Kill ignores that skip list.
+C Fly and weapon toggles. Owner accounts are always excluded from AutoWin shooting
+and Auto Kill targeting, including selected priorities and queued shots.
+Local Juggernaut Auto Kill ignores the optional survivor skip list.
 The separate Kill First list shuffles selected eligible players once per
 round and finishes them before other survivors. AutoWin and Follow Jug
 share the exact position function. Existing pistol controllers are located

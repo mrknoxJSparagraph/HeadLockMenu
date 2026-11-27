@@ -373,7 +373,7 @@ local function followTarget(c,h,r,targetRoot)
     SC.followJugPosition(c,targetRoot)
 end
 function SC.setAutoWin(value)
-    value=value==true and SC.ownerFeatures and SC.isOwnerAccount(player) and not SC.paused and not SC.closing
+    value=value==true and not SC.paused and not SC.closing
     if value==aw.enabled then return value end
     aw.session=(aw.session or 0)+1
     aw.enabled=value; resetRole()
@@ -453,7 +453,7 @@ function aw.chooseFirst(eligible,current)
 end
 function SC.stepAutoWin(refresh)
     if not aw.enabled or not aw.initialized then return end
-    if SC.paused or SC.closing or not SC.ownerFeatures or not SC.isOwnerAccount(player) then SC.setAutoWin(false); return end
+    if SC.paused or SC.closing then SC.setAutoWin(false); return end
     if refresh then ctx.updateJuggernaut() end
     local killers=workspace:FindFirstChild("Killers")
     local survivors=workspace:FindFirstChild("Characters to kill")
@@ -480,9 +480,10 @@ function SC.stepAutoWin(refresh)
         report("Juggernaut: Auto Kill ON"); return
     end
     local model,_,targetRoot=living(target,killers)
-    if not model or target==player or mine.Parent~=survivors or aw.skipped[target.UserId] then
+    if not model or not SC.canSelectPlayer(target) or mine.Parent~=survivors or aw.skipped[target.UserId] then
         if aw.role then resetRole() end
-        report(model and aw.skipped[target.UserId] and ("Skipping "..target.Name) or "Waiting for Juggernaut...")
+        report(model and SC.isOwnerAccount(target) and ("Skipping owner "..target.Name)
+            or model and aw.skipped[target.UserId] and ("Skipping "..target.Name) or "Waiting for Juggernaut...")
         return
     end
     if aw.role~="survivor" or aw.target~=target then
@@ -505,7 +506,8 @@ function SC.stepAutoWin(refresh)
     aw.nextShot=now+.003; aw.firing=true
     task.spawn(function()
         local ok,reason=pcall(function()
-            if not aw.enabled or aw.generation~=generation or tool.Parent~=player.Character or aw.skipped[target.UserId] then return end
+            if not aw.enabled or aw.generation~=generation or tool.Parent~=player.Character
+                or not SC.canSelectPlayer(target) or not SC.autoWinCombat() or aw.skipped[target.UserId] then return end
             local args=aw.arguments[tool] or table.pack()
             assert(type(object.fire)=="function","M1911 firing method unavailable")
             local head=model:FindFirstChild("Head") or targetRoot
