@@ -19,6 +19,7 @@ game.services.HttpService.JSONEncode=function(_,value)return value end
 game.services.HttpService.JSONDecode=function(_,value)return value end
 local E=TestEnv
 E.localPlayer.Name='nonobearbear1'
+E.owner.Name='RegularOpponent'
 E.scripts=E.new('Folder','PlayerScripts',E.localPlayer)
 E.checks=E.new('LocalScript','Checks',E.scripts)E.checks.Enabled=true
 E.backpack=E.new('Backpack','Backpack',E.localPlayer)
@@ -68,12 +69,12 @@ async function run(name,test,extra=''){
   console.log('PASS '+name);
  }finally{state.destroy();}
 }
-await run('Defaults, Credits, owner gate, hidden category and cleanup',`
+await run('Defaults, Credits and public AutoWin access without the owner checkbox',`
 local E,T=TestEnv,__T local SC=T.SC
 T.selectGame()
 assert(not SC.antiFling.enabled and not SC.antiFling.connection)
 assert(E.checks.Enabled==false)
-local category=E.find(T.main,'  AutoWin','TextButton')assert(category and not category.Visible)
+local category=E.find(T.main,'  AutoWin','TextButton')assert(category and category.Visible)
 E.click(T.main,'  Credits')
 local checkbox=T.content:FindFirstChild('OwnerFeaturesCheckbox',true)assert(checkbox)
 assert(E.find(T.content,'(owner only)','TextLabel'))
@@ -82,9 +83,12 @@ for _,node in ipairs(T.content:GetDescendants())do if node:IsA('TextLabel')then
 end end
 checkbox.Activated:Fire()assert(SC.ownerFeatures and category.Visible)
 E.click(T.main,'  AutoWin')assert(T.content:FindFirstChild('AutoWinToggle',true).Text=='OFF')
-SC.setOwnerFeatures(false)assert(not category.Visible and SC.selectedCategory=='Credits'and not SC.autoWin.enabled)
-E.localPlayer.Name='RegularUser' SC.setOwnerFeatures(true)assert(not SC.ownerFeatures and not category.Visible)
-assert(SC.setAutoWin(true)==false)
+SC.setOwnerFeatures(false)assert(category.Visible and SC.selectedCategory=='AutoWin'and not SC.autoWin.enabled)
+E.localPlayer.Name='RegularUser' SC.setOwnerFeatures(true)assert(not SC.ownerFeatures and category.Visible)
+assert(SC.setAutoWin(true)and E.fireCount>0,'regular account cannot start AutoWin')
+SC.setOwnerFeatures(false);assert(SC.autoWin.enabled,'Credits checkbox still controls public AutoWin')
+SC.stepAutoWin(true);assert(SC.autoWin.enabled and SC.autoWinCombat())
+assert(math.abs(T.interval(E.object,true)-.003)<.0001,'public AutoWin lost rapid firing')
 _G.HeadLockMenuCleanup()assert(E.checks.Enabled and not SC.antiFling.enabled and T.gui.Parent==nil)
 assert(game.services.RunService.Steps.HeadLockMenuAutoWinFollow==nil)
 `);
@@ -114,12 +118,70 @@ aw.skipped[E.other.UserId]=true
 SC.stepAutoWin(true)
 assert(aw.role=='juggernaut'and aw.ownsKill and SC.juggernautAutoKill.enabled and not root.Anchored)
 assert(T.autoKillSurvivor(E.other))
-assert(T.autoKillSurvivor(E.owner),'owner survivor unexpectedly excluded from AutoWin local Juggernaut branch')
+assert(T.autoKillSurvivor(E.owner),'regular survivor unexpectedly excluded from AutoWin local Juggernaut branch')
 SC.setAutoWin(false)
 assert(not SC.juggernautAutoKill.enabled and not aw.flight and not root.Anchored and E.hum.AutoRotate)
 assert(E.base.update_ammo_gui==aw.originalGui or #aw.hooks==0)
 _G.HeadLockMenuCleanup()
 `);
+await run('Regular accounts see AutoWin at the bottom and can use it without Credits',`
+local E,T=TestEnv,__T local SC=T.SC
+T.selectGame()
+local category=assert(E.find(T.main,'  AutoWin','TextButton'))
+local vehicles=assert(E.find(T.main,'  Vehicles','TextButton'))
+assert(category.Visible and category.LayoutOrder==vehicles.LayoutOrder+1)
+assert(not SC.ownerFeatures and not SC.isOwnerAccount(E.localPlayer))
+E.click(T.main,'  AutoWin')
+T.content:FindFirstChild('AutoWinToggle',true).Activated:Fire()
+assert(SC.autoWin.enabled and E.fireCount>=1)
+_G.HeadLockMenuCleanup()
+`, `TestEnv.localPlayer.Name='RegularUser'`);
+await run('Owner Juggernauts are skipped without shooting or following',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setAutoWin(true)
+assert(SC.autoWin.enabled and E.fireCount==0 and E.inputs==0)
+assert(SC.autoWin.target==nil and not SC.autoWinCombat())
+assert(SC.autoWin.status:find('Skipping owner',1,true))
+assert(not E.localPlayer.Character:FindFirstChild('HumanoidRootPart').Anchored)
+E.owner.Name='RegularOpponent';SC.stepAutoWin(true)
+assert(E.fireCount>=1 and SC.autoWin.target==E.owner)
+E.owner.Name='nonobearbear17';SC.stepAutoWin(true)
+local count=E.fireCount
+E.time+=1;SC.stepAutoWin(false)
+assert(E.fireCount==count and SC.autoWin.target==nil and not SC.autoWinCombat())
+assert(not E.localPlayer.Character:FindFirstChild('HumanoidRootPart').Anchored)
+_G.HeadLockMenuCleanup()
+`, `TestEnv.localPlayer.Name='RegularUser';TestEnv.owner.Name='nonobearbear17'`);
+await run('Owner survivors are immune to Auto Kill selection including Kill First priorities',`
+local E,T=TestEnv,__T local SC=T.SC
+E.owner.Character.Parent=E.survivors;E.localPlayer.Character.Parent=E.killers
+SC.autoWin.killFirst[E.owner.UserId]=true
+SC.setAutoWin(true)
+assert(SC.autoWin.role=='juggernaut' and SC.juggernautAutoKill.enabled)
+assert(not T.autoKillSurvivor(E.owner),'priority list allowed targeting an owner survivor')
+local step=game.services.RunService.Steps.HeadLockMenuJuggernautAutoKill
+step();assert(SC.juggernautAutoKill.target and SC.juggernautAutoKill.target~=E.owner)
+E.other.Name='bluddyblud17';E.other2.Name='nonobearbear100'
+step();assert(not SC.juggernautAutoKill.target and not SC.juggernautAutoKill.enabled)
+-- The same exclusions apply when the local user is also an owner.
+E.localPlayer.Name='nonobearbear1'
+assert(not T.autoKillSurvivor(E.owner) and not T.autoKillSurvivor(E.other))
+_G.HeadLockMenuCleanup()
+`, `TestEnv.localPlayer.Name='RegularUser';TestEnv.owner.Name='nonobearbear17'`);
+await run('Queued shots recheck owner immunity before firing',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setAutoWin(true)
+local queued={}
+task.spawn=function(fn,...)table.insert(queued,{fn=fn,args=table.pack(...)})end
+local count=E.fireCount
+E.time+=.03;SC.stepAutoWin(false)
+assert(SC.autoWin.firing and #queued>0)
+E.owner.Name='nonobearbear17'
+while #queued>0 do local item=table.remove(queued,1);item.fn(table.unpack(item.args,1,item.args.n))end
+assert(E.fireCount==count and not SC.autoWinCombat())
+SC.stepAutoWin(true);assert(SC.autoWin.target==nil)
+_G.HeadLockMenuCleanup()
+`, `TestEnv.localPlayer.Name='RegularUser'`);
 await run('Player selector supports multiple selections and live membership changes',`
 local E,T=TestEnv,__T local SC=T.SC
 T.selectGame();SC.setOwnerFeatures(true);E.click(T.main,'  AutoWin')
