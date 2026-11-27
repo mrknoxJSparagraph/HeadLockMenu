@@ -23,10 +23,17 @@ E.scripts=E.new('Folder','PlayerScripts',E.localPlayer)
 E.checks=E.new('LocalScript','Checks',E.scripts)E.checks.Enabled=true
 E.backpack=E.new('Backpack','Backpack',E.localPlayer)
 E.tool=E.new('Tool','M1911',E.backpack)
-E.fireCount=0
+local handle=E.new('Part','Handle',E.tool)
+E.fireSound=E.new('Sound','Fire',handle);E.fireSound.Played=E.signal()
+E.fireCount=0;E.inputs=0;E.releases=0
+E.fireContext=function()E.contextCalls=(E.contextCalls or 0)+1 end
 E.base={fire=function(self,...)
  assert(self.instance.Parent==E.localPlayer.Character,'shot while not equipped')
+ local context=...;context()
+ assert(context==E.fireContext,'missing original firing context')
+ if E.fireCount==0 then assert(self.shoot_wait==.2,'initial trigger skipped normal weapon setup')end
  E.fireCount+=1
+ E.fireSound.Played:Fire()
  self.ammo-=1
  self:fire_wait()
  self:recoil_camera()
@@ -48,6 +55,11 @@ typeof=function(v)if type(v)=='table'and v._props then return 'Instance'else ret
 local uis=game.services.UserInputService
 uis.WindowFocusReleased=E.signal();uis.JumpRequest=E.signal()
 uis.GetFocusedTextBox=function()return nil end
+uis.CreateVirtualInput=function()
+ return {SendMouseButton=function(self,point,button,down)
+  if down then E.inputs+=1;E.object:fire(E.fireContext)else E.releases+=1 end
+ end}
+end
 `;
 async function run(name,test,extra=''){
  const state=await LuauState.createAsync({print:console.log});
@@ -141,19 +153,21 @@ SC.setOwnerFeatures(true)
 assert(E.fireCount==0)
 SC.setAutoWin(true)
 assert(E.fireCount>=1,'cold pistol still needs a manual first shot')
-assert(E.callbackCalls==0,'discovery invoked the mobile input handler')
+assert(E.callbackCalls==1,'normal mobile trigger was skipped or duplicated')
+assert(SC.autoWin.arguments[E.tool][1]==E.fireContext)
 assert(SC.autoWin.objects[E.tool]==E.object)
 _G.HeadLockMenuCleanup()
 `, `
 local E=TestEnv
 E.hum.EquipTool=function(self,tool)tool.Parent=E.localPlayer.Character end
+game.services.UserInputService.CreateVirtualInput=function()return nil end
 local pg=E.localPlayer:FindFirstChildOfClass('PlayerGui')
 local mouse=E.new('ScreenGui','Mouse',pg)
 local frame=E.new('Frame','Mobile Frame',mouse)
 E.fireButton=E.new('ImageButton','Mobile Fire',frame)
 E.fireButton.MouseButton1Down=E.signal()
 E.callbackCalls=0
-local callback=function()E.callbackCalls+=1;E.object:fire()end
+local callback=function()E.callbackCalls+=1;E.object:fire(E.fireContext)end
 getconnections=function(signal)
  if signal==E.fireButton.MouseButton1Down then return {{Function=callback}}end
  return {}
@@ -191,6 +205,98 @@ local cached=function()return E.object end
 getgc=function()return {cached}end
 debug=table.clone(debug)
 debug.getupvalues=function(fn)if fn==cached then return {E.object}end return {}end
+`);
+await run('Discovered cold object uses a normal trigger and preserves its firing callback for replay',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+assert(E.inputs==1 and E.releases==1 and E.fireCount>=1)
+assert(SC.autoWin.arguments[E.tool][1]==E.fireContext)
+assert(SC.autoWin.ready[E.tool].object==E.object)
+local count=E.fireCount
+for i=1,5 do E.time+=.03;SC.stepAutoWin(false)end
+assert(E.fireCount>count and E.inputs==1,'replayed first input instead of captured firing context')
+assert(SC.autoWin.arguments[E.tool][1]==E.fireContext,'replay erased required callback')
+SC.setAutoWin(false)
+count=E.fireCount;E.time+=1;SC.stepAutoWin(false);assert(E.fireCount==count)
+_G.HeadLockMenuCleanup()
+`, `getgc=function()return {TestEnv.object}end`);
+await run('No-op automatic input is reported without treating controller discovery as a shot',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+assert(E.inputs==1 and E.releases==1 and E.fireCount==0)
+assert(SC.autoWin.ready[E.tool]==nil and SC.autoWin.arguments[E.tool]==nil)
+assert(SC.autoWin.status=='Automatic trigger unavailable. No first shot detected.')
+assert(SC.autoWin.primer==nil)
+_G.HeadLockMenuCleanup()
+`, `
+local E=TestEnv
+getgc=function()return {E.object}end
+game.services.UserInputService.CreateVirtualInput=function()
+ return {SendMouseButton=function(self,point,button,down)
+  if down then E.inputs+=1 else E.releases+=1 end
+ end}
+end
+`);
+await run('Failed first input falls back to the mobile icon with the actual toggle input',`
+local E,T=TestEnv,__T local SC=T.SC
+T.selectGame();SC.setOwnerFeatures(true);E.click(T.main,'  AutoWin')
+T.content:FindFirstChild('AutoWinToggle',true).Activated:Fire(E.touch)
+assert(E.inputs==1 and E.releases==1 and E.iconCalls==1 and E.fireCount>=1)
+assert(SC.autoWin.arguments[E.tool][1]==E.fireContext)
+assert(SC.autoWin.primer==nil and SC.autoWin.busy[E.object]==0)
+_G.HeadLockMenuCleanup()
+`, `
+local E=TestEnv
+E.touch={UserInputType=Enum.UserInputType.Touch}
+getgc=function()return {E.object}end
+game.services.UserInputService.CreateVirtualInput=function()
+ return {SendMouseButton=function(self,point,button,down)
+  if down then E.inputs+=1;E.object:fire()else E.releases+=1 end
+ end}
+end
+local pg=E.localPlayer:FindFirstChildOfClass('PlayerGui')
+local frame=E.new('Frame','Mobile Frame',E.new('ScreenGui','Mouse',pg))
+local button=E.new('ImageButton','Mobile Fire',frame)
+for _,name in ipairs({'MouseButton1Down','MouseButton1Up','MouseButton1Click'})do button[name]=E.signal()end
+local icon=E.new('ImageLabel','Icon',button)
+E.iconCalls=0
+getconnections=function(signal)
+ if signal==icon.InputBegan then return {{Function=function(input)
+  assert(input==E.touch and __T.SC.autoWin.arguments[E.tool]==nil)
+  E.iconCalls+=1;E.object:fire(E.fireContext)
+ end}}end
+ return {}
+end
+`);
+await run('Stale context recovery',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+E.expired=true;E.time+=.03;SC.stepAutoWin(false)
+assert(SC.autoWin.ready[E.tool]==nil and SC.autoWin.arguments[E.tool]==nil,'stale context was retained: '..SC.autoWin.status)
+assert(SC.autoWin.replaying[E.object]==nil and SC.autoWin.busy[E.object]==0,'replay did not release busy flag')
+assert(SC.autoWin.status:find('expired context',1,true),'unexpected replay error: '..SC.autoWin.status)
+E.fireContext=function()end
+E.time+=.03;SC.stepAutoWin(false)
+assert(E.inputs==2 and SC.autoWin.ready[E.tool],'failed to recover: '..SC.autoWin.status..' inputs='..E.inputs)
+assert(SC.autoWin.arguments[E.tool][1]==E.fireContext,'fresh callback not cached')
+_G.HeadLockMenuCleanup()
+`, `TestEnv.fireContext=function()assert(not TestEnv.expired,'expired context')end`);
+await run('OFF during a held first trigger releases input and cancels firing and flight',`
+local E,T=TestEnv,__T local SC=T.SC
+SC.setOwnerFeatures(true);SC.setAutoWin(true)
+assert(not SC.autoWin.enabled and SC.autoWin.primer==nil)
+assert(E.inputs==1 and E.releases==1 and not E.down and E.fireCount==0)
+assert(not E.localPlayer.Character:FindFirstChild('HumanoidRootPart').Anchored)
+assert(E.hum.AutoRotate)
+_G.HeadLockMenuCleanup()
+`, `
+local E=TestEnv
+game.services.UserInputService.CreateVirtualInput=function()
+ return {SendMouseButton=function(self,point,button,down)
+  E.down=down
+  if down then E.inputs+=1;__T.SC.setAutoWin(false)else E.releases+=1 end
+ end}
+end
 `);
 await run('Respawned pistol does not inherit old discovery or equip delays',`
 local E,T=TestEnv,__T local SC=T.SC
