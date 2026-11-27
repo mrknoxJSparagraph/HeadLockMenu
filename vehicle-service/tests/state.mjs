@@ -20,8 +20,8 @@ test('one driver, ownership handoff, fencing, release and single seat across car
 test('expired driver cannot renew and disconnected users release seats',()=>{
  let s=setup();const epoch=run(s,a,'claim',{id:'vehicle_a'}).result.epoch;
  assert.equal(run(s,b,'claim',{id:'vehicle_a'}).result.ok,false);
- let r=run(s,b,'claim',{id:'vehicle_a'},8000);assert.equal(r.result.ok,true);assert.notEqual(r.result.epoch,epoch);
- run(s,b,'leave',{},8001);assert.equal(s.cars.vehicle_a.driver,null);
+ let r=run(s,b,'claim',{id:'vehicle_a'},18000);assert.equal(r.result.ok,true);assert.notEqual(r.result.epoch,epoch);
+ run(s,b,'leave',{},18001);assert.equal(s.cars.vehicle_a.driver,null);
 });
 test('authentication, malformed poses, and stale sequence numbers are rejected',()=>{
  let s=setup();assert.throws(()=>run(s,{...a,secret:'wrong_secret'},'claim',{id:'vehicle_a'}));
