@@ -82,6 +82,12 @@ down=true;a.net.tick();assert(not a.net.connected)
 down=false;a.net.tick();assert(a.net.connected)
 a.net:delete(v);a.net.tick();b.net.tick();assert(v.dead and other.dead and not cars[v.netId])
 a.net:close();assert(a.net.closed and not a.net.connected)
+local d=client(4);d.net.tick()
+local driven={kind='Car',pose=pose};d.net:register(driven);d.net.tick();d.net:claim(driven);d.net.tick()
+assert(d.net:isDriver(driven));clock+=.8
+local parked={kind='Bike',pose=pose};d.net:register(parked);d.net.tick()
+assert(sequences[d.net.session]==1 and not parked.published,'queued spawn took priority over driver renewal')
+d.net.tick();assert(parked.published and d.net:isDriver(driven))
 local missing=install({Http=http,player={UserId=3}});assert(not missing.enabled and missing.error=='Shared unavailable')
 print('PASS shared spawn visibility, one-seat contention, remote motion, handoff, ownership, lease deadlines, stale replies, reconnect, deletion and unavailable transport')
 `, 'vehicle sync',true)();
