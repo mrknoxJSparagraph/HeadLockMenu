@@ -1,12 +1,13 @@
 return function(SC,ctx)
 local state={enabled=false,saves={},selected=nil,status='',saveBusy=false,listBusy=false}
 SC.building=state
-local function allowed()return SC.isOwnerAccount(ctx.player)and SC.ownerFeatures and not SC.closing and not SC.paused end
+local function ownerAllowed()return SC.isOwnerAccount(ctx.player)and SC.ownerFeatures and not SC.closing and not SC.paused end
+local function allowed()return SC.canBuild()and not SC.closing and not SC.paused end
 local function update()if state.update then state.update()end;if state.ownerUpdate then state.ownerUpdate()end end
 local function report(text)state.status=text or'';update()end
 local function api()
  if not state.api then
-  assert(SC.isOwnerAccount(ctx.player),'Owner only')
+  assert(SC.canBuild(),'Building access required')
   state.api=ctx.createBuilder({enabled=false,hideShortcut=true})
  end
  return state.api
@@ -26,17 +27,33 @@ function SC.setBuilding(value)
  value=value==true and allowed()
  if not value then if state.enabled and SC.ownerSync then SC.ownerSync.pendingBuild=true end;state.enabled=false;if state.api then state.api.setEnabled(false)end;if state.prompt then state.prompt:Destroy();state.prompt=nil end;update();return false end
  local ok,why=pcall(function()
-  local builder=api();local net=SC.ownerSync;local shared=net and net.docs[tostring(ctx.player.UserId)]
-  if shared and(#builder.document().parts==0 or net.publishBlocked)then builder.import(shared)end
-  if net then net.publishBlocked=false end
+  local builder=api();local net=SC.ownerSync;local principal=net and net.buildOwner or ctx.player.UserId;local shared=net and net.docs[tostring(principal)]
+  if shared and(net.editingOwner~=principal or #builder.document().parts==0)then builder.sync(shared,true)
+  elseif SC.temporaryAccess and(not net or net.editingOwner~=principal)then builder.sync({format='HeadLockTrack',version=1,placeId=game.PlaceId,name='Build',parts={}},true)end
+  if net then net.attach()end
   builder.setEnabled(true);builder.openMenu();state.enabled=true
-  if net and shared and net.replicas[tostring(ctx.player.UserId)]then net.replicas[tostring(ctx.player.UserId)].folder:Destroy();net.replicas[tostring(ctx.player.UserId)]=nil end
  end)
  if not ok then report(tostring(why));return false end
  update();return true
 end
+function SC.setTemporaryAccess(value,principal)
+ value=value==true and not SC.isOwnerAccount(ctx.player)
+ local before=SC.temporaryAccess==true
+ if before==value and state.accessPrincipal==principal then return end
+ if before and(not value or state.accessPrincipal~=principal)then
+  SC.setBuilding(false)
+  if state.api then state.api.sync({format='HeadLockTrack',version=1,placeId=game.PlaceId,name='Build',parts={}},true)end
+  if SC.ownerSync then SC.ownerSync.detach()end
+  SC.rapidFirePower=100;SC.rapidFireEnabled=false
+  if SC.setAutoWin then SC.setAutoWin(false)end
+ end
+ SC.temporaryAccess=value;state.accessPrincipal=principal
+ if SC.refreshOwnerCategories then SC.refreshOwnerCategories()end
+ if SC.updateRapidFire then SC.updateRapidFire()end
+ update()
+end
 function state.save(name,saveId)
- if not allowed()or state.saveBusy then return end
+ if not ownerAllowed()or state.saveBusy then return end
  name=tostring(name or''):match('^%s*(.-)%s*$'):gsub('%c',''):sub(1,80)
  if name==''then report('Enter a name');return end
  local net=SC.ownerSync;if not net or not net.owner then report('Private owner access required');return end
@@ -50,7 +67,7 @@ function state.save(name,saveId)
  end)
 end
 function state.list()
- if not allowed()or state.listBusy then return end
+ if not ownerAllowed()or state.listBusy then return end
  local net=SC.ownerSync;if not net or not net.owner then report('Private owner access required');return end
  state.listBusy=true
  net.enqueue('list',{},function(success,data)
@@ -60,7 +77,7 @@ function state.list()
  end)
 end
 function state.load()
- if not allowed()or not state.selected or state.saveBusy then return end
+ if not ownerAllowed()or not state.selected or state.saveBusy then return end
  local chosen=state.selected;local net=SC.ownerSync
  if not net or not net.owner then report('Private owner access required');return end
  state.saveBusy=true;report('Loading')
@@ -72,7 +89,7 @@ function state.load()
  end)
 end
 function state.namePrompt()
- if not allowed()then return end
+ if not ownerAllowed()then return end
  if state.prompt then state.prompt:Destroy()end
  local make,button=ctx.make,ctx.button
  local frame=make('Frame',{Name='BuildNamePrompt',AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.fromOffset(300,156),BackgroundColor3=ctx.black,ZIndex=25,Active=true},ctx.gui);state.prompt=frame
@@ -103,6 +120,7 @@ function SC.drawBuilding(container)
  local list=make('ScrollingFrame',{Name='BuildSaves',Position=UDim2.fromOffset(0,134),Size=UDim2.new(1,-3,0,232),CanvasSize=UDim2.new(),BorderSizePixel=0,ScrollBarThickness=3,BackgroundTransparency=1,Visible=false},panel)
  local load=button('Load Build',panel);load.Name='LoadBuild';load.Position=UDim2.fromOffset(0,376);load.Size=UDim2.new(1,0,0,34)
  local status=make('TextLabel',{Name='BuildingStatus',Position=UDim2.fromOffset(0,420),Size=UDim2.new(1,0,0,64),BackgroundTransparency=1,TextWrapped=true,TextColor3=ctx.white,TextSize=13,Font=Enum.Font.Code},panel)
+ local cloud=ownerAllowed();save.Visible=cloud;saves.Visible=cloud;load.Visible=cloud
  local rows={};local last=''
  state.update=function()
   if not panel.Parent then state.update=nil;return end
@@ -126,7 +144,7 @@ function SC.drawBuilding(container)
  state.update();if state.enabled and state.api then state.api.openMenu()end
 end
 function SC.drawOwnerPanel(container)
- if not allowed()then return end
+ if not ownerAllowed()then return end
  local make,button=ctx.make,ctx.button
  local panel=make('Frame',{Size=UDim2.fromScale(1,1),BackgroundTransparency=1},container)
  make('TextLabel',{Text='Owner Panel',Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,TextColor3=ctx.white,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
@@ -137,22 +155,25 @@ function SC.drawOwnerPanel(container)
   if not panel.Parent then state.ownerUpdate=nil;return end
   local net=SC.ownerSync;status.Text=net and net.error or'Connecting'
   local users=net and net.roster or{};local visible={}
-  for _,user in ipairs(users)do table.insert(visible,{user.session,user.username,user.owner,user.actual.paused,user.actual.soundsPaused,user.pending})end
+  for _,user in ipairs(users)do table.insert(visible,{user.session,user.username,user.owner,user.actual.paused,user.actual.soundsPaused,user.pending,user.access})end
   local fingerprint=ctx.Http:JSONEncode(visible)
   if fingerprint==last then return end;last=fingerprint
   for _,row in ipairs(rows)do row:Destroy()end;rows={}
   local count=0
   for _,user in ipairs(users)do if not user.owner then
-   local frame=make('Frame',{Name='OwnerUser_'..user.session,Position=UDim2.fromOffset(0,count*92),Size=UDim2.new(1,-6,0,86),BackgroundTransparency=1},list);table.insert(rows,frame);count+=1
+   local frame=make('Frame',{Name='OwnerUser_'..user.session,Position=UDim2.fromOffset(0,count*128),Size=UDim2.new(1,-6,0,122),BackgroundTransparency=1},list);table.insert(rows,frame);count+=1
    make('TextLabel',{Text=user.username,Position=UDim2.fromOffset(0,0),Size=UDim2.new(.62,0,0,28),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,BackgroundTransparency=1,TextColor3=ctx.white,TextSize=14,Font=Enum.Font.Code},frame)
    local flags=(user.actual.paused and'Paused'or'Active')..(user.actual.soundsPaused and' / Muted'or'')..(user.pending and' …'or'')
    make('TextLabel',{Text=flags,Position=UDim2.new(.62,0,0,0),Size=UDim2.new(.38,0,0,28),BackgroundTransparency=1,TextColor3=ctx.white,TextSize=10,Font=Enum.Font.Code},frame)
    for i,item in ipairs({{'Pause','pause'},{'Resume','resume'},{'Mute','mute'},{'Unmute','unmute'},{'Kick','kick'}})do
     local b=button(item[1],frame);b.Name='Owner_'..item[2];b.Position=UDim2.new((i-1)/5,0,0,36);b.Size=UDim2.new(.2,-3,0,34);b.TextSize=11
-    b.Activated:Connect(function()if allowed()and net then net.command(user.session,item[2])end end)
+    b.Activated:Connect(function()if ownerAllowed()and net then net.command(user.session,item[2])end end)
    end
+   local access=button(user.access and'Revoke Access'or'Give Access',frame);access.Name='Owner_access';access.Position=UDim2.fromOffset(0,76);access.Size=UDim2.new(1,-3,0,32);access.TextSize=12
+   access.Activated:Connect(function()if ownerAllowed()and net then net.command(user.session,user.access and'revoke'or'grant')end end)
+   if user.room~=net.room and not user.access then access.Text='Different server';access.Active=false end
   end end
-  list.CanvasSize=UDim2.fromOffset(0,count*92)
+  list.CanvasSize=UDim2.fromOffset(0,count*128)
  end
  state.ownerUpdate()
 end

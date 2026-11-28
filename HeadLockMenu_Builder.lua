@@ -425,6 +425,30 @@ local function import(data)
  if not ok then for id,d in pairs(before)do apply(id,d)end;trackName=oldName;error(err,0)end
  trackName=data.name;push(before,after);selectPart(nil);draft();tell('Loaded '..#data.parts..' pieces.');return #data.parts
 end
+local function sync(data,resetHistory)
+ assert(not drag,'Finish the current edit first')
+ data=normalize(data)
+ local function signature(d)
+  local surf={};for _,key in ipairs(surfaces)do table.insert(surf,d.surfaces and d.surfaces[key]or'Smooth')end
+  return Http:JSONEncode({d.class,d.name,d.shape or'Block',d.size,d.cf,d.color,d.material,d.materialVariant or'',d.transparency or 0,d.reflectance or 0,d.canCollide~=false,d.canTouch==true,d.canQuery~=false,d.castShadow~=false,surf,d.physics or{}})
+ end
+ local incoming={};for _,part in ipairs(data.parts)do incoming[part.id]=part end
+ local affected={}
+ for id,p in pairs(objects)do
+  if not incoming[id]then affected[id]=true;apply(id,false)
+  elseif signature(record(p))~=signature(incoming[id])then affected[id]=true;apply(id,incoming[id])end
+ end
+ for id,part in pairs(incoming)do if not objects[id]then affected[id]=true;apply(id,part)end end
+ local function prune(stack)
+  for i=#stack,1,-1 do
+   local entry=stack[i]
+   for id in pairs(affected)do entry.before[id]=nil;entry.after[id]=nil end
+   if next(entry.before)==nil then table.remove(stack,i)end
+  end
+ end
+ if resetHistory then table.clear(history);table.clear(redo);selectPart(nil)else prune(history);prune(redo);selectionParts()end
+ trackName=data.name;changed=true;refresh();return #data.parts
+end
 local exportBox,exportWindow
 local function exportText()return PREFIX..Http:JSONEncode(document())end
 local function showTransfer(text)
@@ -1006,6 +1030,8 @@ function api.setEnabled(value)
 end
 api.openMenu=function()if ui.toolsEnabled then ui.showMain('Edit')end end
 api.isEnabled=function()return ui.toolsEnabled==true end
+api.isBusy=function()return drag~=nil end
+api.sync=sync
 function api.cleanup()
  if closed then return end
  cancelInteraction();pcall(draft);closed=true

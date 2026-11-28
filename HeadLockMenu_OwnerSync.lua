@@ -1,13 +1,13 @@
 return function(SC,ctx)
 local Http=game:GetService('HttpService')
-local state={enabled=false,connected=false,owner=false,closed=false,busy=false,queue={},versions={},docs={},roster={},published={},lastDesired=0,replicas={},nextTick=0,elapsed=0,error='Connecting'}
+local state={enabled=false,connected=false,owner=false,canBuild=false,temporary=false,closed=false,busy=false,queue={},versions={},docs={},roster={},published={},lastDesired=0,replicas={},nextTick=0,elapsed=0,error='Connecting',buildOwner=ctx.player.UserId}
 local send=type(request)=='function'and request or type(http_request)=='function'and http_request or type(syn)=='table'and syn.request or type(http)=='table'and http.request
 state.close=function()state.closed=true end
 local function report(text)state.error=text;if ctx.update then ctx.update()end end
 if type(send)~='function'then report('Shared connection unavailable');return state end
 if type(game.JobId)~='string'or #game.JobId<8 then report('Shared needs a live server');return state end
 local function guid()return(Http:GenerateGUID(false):gsub('[{}%-]',''))end
-state.enabled=true;state.session=guid();local secret=guid();local room=tostring(game.PlaceId)..':'..game.JobId
+state.enabled=true;state.session=guid();local secret=guid();local room=tostring(game.PlaceId)..':'..game.JobId;state.room=room
 local access=_G.HeadLockOwnerAccess
 if SC.isOwnerAccount(ctx.player)and(type(access)~='table'or type(access.key)~='string')and type(readfile)=='function'then
  local ok,value=pcall(function()return Http:JSONDecode(readfile('HeadLockOwnerAccess_v1.json'))end)
@@ -33,8 +33,7 @@ local function sigs(doc)
  local out={};for _,part in ipairs(doc.parts or{})do out[part.id]=fingerprint(part)end;return out
 end
 local function render(build)
- local localApi=ctx.builderApi()
- if build.owner==ctx.player.UserId and localApi then
+ if build.owner==state.editingOwner and ctx.builderApi()then
   local old=state.replicas[tostring(build.owner)];if old then old.folder:Destroy();state.replicas[tostring(build.owner)]=nil end
   return
  end
@@ -61,14 +60,53 @@ local function render(build)
  end
  for id,part in pairs(r.parts)do if not seen[id]then part:Destroy();r.parts[id]=nil;r.signatures[id]=nil end end
 end
-local function receive(data)
+local function reconcile(doc,reference)
+ local api=ctx.builderApi()
+ if state.editingOwner==state.buildOwner and api then
+  if api.isBusy()then state.deferred={doc=doc,reference=state.deferred and state.deferred.reference or reference};return end
+  local current=api.document();local currentSigs=sigs(current);local base=reference.parts;local parts={}
+  for _,part in ipairs(doc.parts)do parts[part.id]=part end
+  for id in pairs(base)do if not currentSigs[id]then parts[id]=nil end end
+  for _,part in ipairs(current.parts)do if currentSigs[part.id]~=base[part.id]then parts[part.id]=part end end
+  local merged={format=doc.format,version=doc.version,placeId=doc.placeId,name=current.name~=reference.name and current.name or doc.name,parts={}}
+  for _,part in pairs(parts)do table.insert(merged.parts,part)end
+  api.sync(merged)
+ end
+ state.published=sigs(doc);state.publishedName=doc.name;state.deferred=nil
+end
+function state.attach()
+ state.editingOwner=state.buildOwner;state.deferred=nil
+ local doc=state.docs[tostring(state.buildOwner)]
+ state.published=doc and sigs(doc)or{};state.publishedName=doc and doc.name or nil
+ local replica=state.replicas[tostring(state.buildOwner)];if replica then replica.folder:Destroy();state.replicas[tostring(state.buildOwner)]=nil end
+end
+function state.detach()
+ state.editingOwner=nil;state.deferred=nil;state.pendingBuild=false;state.published={};state.publishedName=nil
+ for key,doc in pairs(state.docs)do render({owner=tonumber(key),doc=doc})end
+end
+local function receive(data,sent)
  if state.closed then return end
- state.connected=true;state.owner=data.self and data.self.owner==true or false;state.error=state.owner and'Connected'or(SC.isOwnerAccount(ctx.player)and'Private owner access required'or'Connected')
+ local identity=data.self or{};local was=state.buildOwner
+ state.connected=true;state.owner=identity.owner==true;state.canBuild=identity.building==true or state.owner;state.temporary=identity.temporary==true
+ state.buildOwner=identity.buildOwner or ctx.player.UserId;state.permissionUntil=os.clock()+10
+ if SC.setTemporaryAccess then SC.setTemporaryAccess(state.temporary,state.buildOwner)end
+ if was~=state.buildOwner then state.deferred=nil end
+ state.error=state.owner and'Connected'or(state.temporary and'Temporary access'or(SC.isOwnerAccount(ctx.player)and'Private owner access required'or'Connected'))
  if type(data.roster)=='table'then state.roster=data.roster end
+ local reference=sent and{parts=sigs(sent),name=sent.name}or{parts=state.published,name=state.publishedName}
+ local publication=data.publication
+ if publication then
+  state.versions[tostring(state.buildOwner)]=publication.revision
+  if publication.doc then
+   state.docs[tostring(state.buildOwner)]=publication.doc
+   reconcile(publication.doc,publication.conflict and{parts=state.published,name=state.publishedName}or reference)
+  elseif sent and not publication.conflict then state.published=sigs(sent);state.publishedName=sent.name end
+  if not publication.conflict then state.pendingBuild=false end
+ end
  for _,build in ipairs(data.builds or{})do
   if type(build)=='table'and type(build.owner)=='number'and type(build.doc)=='table'and build.doc.placeId==game.PlaceId then
    local key=tostring(build.owner);state.versions[key]=build.revision;state.docs[key]=build.doc
-   if build.owner==ctx.player.UserId then state.published=sigs(build.doc);state.publishedName=build.doc.name end
+   if build.owner==state.buildOwner and not(publication and publication.doc)then reconcile(build.doc,reference)end
    render(build)
   end
  end
@@ -93,21 +131,30 @@ function state.command(target,action)
  return state.enqueue('command',{target=target,action=action,requestId=guid()})
 end
 function state.adopt(doc)
- local key=tostring(ctx.player.UserId);state.docs[key]=doc;state.published=sigs(doc);state.publishedName=doc.name
+ local key=tostring(state.buildOwner);state.docs[key]=doc;state.published=sigs(doc);state.publishedName=doc.name
+end
+local function expire()
+ if state.temporary and os.clock()>=(state.permissionUntil or 0)then
+  state.temporary=false;state.canBuild=false;if SC.setTemporaryAccess then SC.setTemporaryAccess(false,ctx.player.UserId)end
+  report('Temporary access needs a connection')
+ end
 end
 function state.tick()
  if state.closed or not state.enabled then return end
+ expire()
+ local api=ctx.builderApi()
+ if state.deferred and api and not api.isBusy()then reconcile(state.deferred.doc,state.deferred.reference)end
  local item=state.connected and table.remove(state.queue,1)or nil
  local op=not state.connected and'join'or item and item.op or'poll';local fields=item and item.fields or{}
  local snapshot
- if op=='poll'and state.owner and(ctx.buildingEnabled()or state.pendingBuild)and not state.publishBlocked then
-  local api=ctx.builderApi()
-  if api then
-   snapshot=api.document();local current=sigs(snapshot);local upsert,removed={},{}
-   for _,part in ipairs(snapshot.parts)do if current[part.id]~=state.published[part.id]then table.insert(upsert,part)end end
-   for id in pairs(state.published)do if not current[id]then table.insert(removed,id)end end
-   if #upsert>0 or #removed>0 or snapshot.name~=state.publishedName then op='publish';fields={baseVersion=state.versions[tostring(ctx.player.UserId)]or 0,upsert=upsert,removed=removed,name=snapshot.name}end
-  end
+ if op=='poll'and state.canBuild and(ctx.buildingEnabled()or state.pendingBuild)and state.editingOwner==state.buildOwner and api and not api.isBusy()then
+  snapshot=api.document();local current=sigs(snapshot);local upsert,removed={},{}
+  for _,part in ipairs(snapshot.parts)do if current[part.id]~=state.published[part.id]then table.insert(upsert,part)end end
+  for id in pairs(state.published)do if not current[id]then table.insert(removed,id)end end
+  if #upsert>0 or #removed>0 or snapshot.name~=state.publishedName then
+   op='publish';fields={baseVersion=state.versions[tostring(state.buildOwner)]or 0,buildOwner=state.buildOwner,merge=true,upsert=upsert,removed=removed}
+   if snapshot.name~=state.publishedName then fields.name=snapshot.name end
+  else snapshot=nil;state.pendingBuild=false end
  end
  local ok,data=pcall(rpc,op,fields)
  if state.closed then return end
@@ -116,15 +163,7 @@ function state.tick()
   if item and item.callback then item.callback(false,state.error)end
   return
  end
- if data.publication then
-  local pub=data.publication;local key=tostring(ctx.player.UserId)
-  state.versions[key]=pub.revision
-  if pub.conflict then
-   state.docs[key]=pub.doc;state.published=sigs(pub.doc);state.publishedName=pub.doc.name;state.publishBlocked=true
-  elseif snapshot then state.published=sigs(snapshot);state.publishedName=snapshot.name;state.pendingBuild=false end
- end
- receive(data)
- if data.publication and data.publication.conflict then report('Shared build changed. Toggle Building off/on to reload.')end
+ receive(data,snapshot)
  if item and item.callback then item.callback(true,data)end
 end
 function state.close()
@@ -136,7 +175,7 @@ end
 state.sharedFolder=shared;state.receive=receive
 ctx.connect(ctx.Run.Heartbeat,function(dt)
  if state.closed or not SC.authenticated then return end
- state.elapsed+=dt;if state.elapsed<.2 or state.busy or os.clock()<state.nextTick then return end
+ expire();state.elapsed+=dt;if state.elapsed<.2 or state.busy or os.clock()<state.nextTick then return end
  state.elapsed=0;state.busy=true;state.nextTick=os.clock()+(ctx.buildingEnabled()and .65 or 1.8)
  task.spawn(function()local ok,err=pcall(state.tick);state.busy=false;if not ok then state.connected=false;report(tostring(err))end;if not state.connected then state.nextTick=os.clock()+3 end end)
 end)

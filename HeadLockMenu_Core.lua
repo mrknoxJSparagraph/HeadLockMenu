@@ -42,7 +42,8 @@ function SC.autoWinCombat()
  local c=aw.target.Character local h=c and c:FindFirstChildOfClass("Humanoid")
  return aw.target.Parent==Players and not aw.skipped[aw.target.UserId] and c and c.Parent==workspace:FindFirstChild("Killers") and h and h.Health>0
 end
-function SC.rapidFireMax()return SC.ownerFeatures and SC.isOwnerAccount(player)and 1000 or 200 end
+function SC.canBuild()return(SC.ownerFeatures and SC.isOwnerAccount(player))or SC.temporaryAccess==true end
+function SC.rapidFireMax()return SC.canBuild()and 1000 or 200 end
 function SC.setOwnerFeatures(value)
  SC.ownerFeatures=value==true and SC.isOwnerAccount(player)
  SC.rapidFirePower=math.clamp(SC.rapidFirePower,0,SC.rapidFireMax())
@@ -375,8 +376,9 @@ nearest,nearestDistance=candidate,distance end end end end end if nearest then a
 local function addCategory(name,draw,section)section=section or"SAKTK"local button=textButton(name,categories)button.Size=UDim2.new(1,-5,0,39)button.TextXAlignment=Enum.TextXAlignment.Left
 button.Name="Category_"..name button.LayoutOrder=#categoryEntries+1
 button.Text="  "..name button.Visible=section==SC.activeGame table.insert(categoryButtons,button)table.insert(categoryEntries,{button=button,section=section,name=name})local function selectCategory()
-if(name=="Building"or name=="Owner Panel")and not(SC.ownerFeatures and SC.isOwnerAccount(player))then return end
+if(name=="Building"and not SC.canBuild())or(name=="Owner Panel"and not(SC.ownerFeatures and SC.isOwnerAccount(player)))then return end
 SC.selectedCategory=name
+SC.updateRapidFire=nil;SC.updateRapidSlider=nil
 if SC.building then SC.building.update=nil;SC.building.ownerUpdate=nil end
 if SC.vehicles then SC.vehicles.unmount()end
 if SC.autoWin then SC.autoWin.update=nil SC.autoWin.refreshPlayers=nil end
@@ -1088,11 +1090,11 @@ local ratio=math.clamp((x-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)loc
 handle.InputBegan:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then activeInput=input
 setFromPointer(input.Position.X)end end)end table.insert(categoryConnections,UIS.InputChanged:Connect(function(input)if activeInput and(input==activeInput or(
 activeInput.UserInputType==Enum.UserInputType.MouseButton1 and input.UserInputType==Enum.UserInputType.MouseMovement))then setFromPointer(input.Position.X)end end))
-table.insert(categoryConnections,UIS.InputEnded:Connect(function(input)if input==activeInput then activeInput=nil end end))update()end make("TextLabel",{Position=UDim2.fromOffset(0,33),
+table.insert(categoryConnections,UIS.InputEnded:Connect(function(input)if input==activeInput then activeInput=nil end end))if not isReload then SC.updateRapidSlider=update end;update()end make("TextLabel",{Position=UDim2.fromOffset(0,33),
 Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,Text="Rapid Fire",TextColor3=WHITE,TextSize=16,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,},panel)
 local toggle=textButton("OFF",panel)toggle.Position=UDim2.fromOffset(0,60)toggle.Size=UDim2.fromOffset(105,36)local function update()toggle.Text=SC.rapidFireEnabled and"ON"or"OFF"
 toggle.BackgroundColor3=SC.rapidFireEnabled and WHITE or BLACK toggle.TextColor3=SC.rapidFireEnabled and BLACK or WHITE end toggle.Activated:Connect(function()if SC.rapidFireEnabled then SC.rapidFireEnabled=false
-else SC.rapidFireEnabled=ensureFireHook()end update()end)update()addSlider(117,function()return SC.rapidFirePower end,function(power)SC.rapidFirePower=math.clamp(power,0,SC.rapidFireMax())end,false,SC.rapidFireMax)make("TextLabel",{
+else SC.rapidFireEnabled=ensureFireHook()end update()end)SC.updateRapidFire=function()if panel.Parent then update();if SC.updateRapidSlider then SC.updateRapidSlider()end end end;update()addSlider(117,function()return SC.rapidFirePower end,function(power)SC.rapidFirePower=math.clamp(power,0,SC.rapidFireMax())end,false,SC.rapidFireMax)make("TextLabel",{
 Position=UDim2.fromOffset(0,174),Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,Text="Rapid Reload",TextColor3=WHITE,TextSize=16,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left,
 },panel)local reloadToggle=textButton("OFF",panel)reloadToggle.Position=UDim2.fromOffset(0,201)reloadToggle.Size=UDim2.fromOffset(105,36)local function updateReload()
 reloadToggle.Text=SC.rapidReloadEnabled and"ON"or"OFF"reloadToggle.BackgroundColor3=SC.rapidReloadEnabled and WHITE or BLACK reloadToggle.TextColor3=SC.rapidReloadEnabled and BLACK or WHITE end
@@ -3477,12 +3479,13 @@ function SC.installBuilding()
 return (function(SC,ctx)
 local state={enabled=false,saves={},selected=nil,status='',saveBusy=false,listBusy=false}
 SC.building=state
-local function allowed()return SC.isOwnerAccount(ctx.player)and SC.ownerFeatures and not SC.closing and not SC.paused end
+local function ownerAllowed()return SC.isOwnerAccount(ctx.player)and SC.ownerFeatures and not SC.closing and not SC.paused end
+local function allowed()return SC.canBuild()and not SC.closing and not SC.paused end
 local function update()if state.update then state.update()end;if state.ownerUpdate then state.ownerUpdate()end end
 local function report(text)state.status=text or'';update()end
 local function api()
  if not state.api then
-  assert(SC.isOwnerAccount(ctx.player),'Owner only')
+  assert(SC.canBuild(),'Building access required')
   state.api=ctx.createBuilder({enabled=false,hideShortcut=true})
  end
  return state.api
@@ -3502,17 +3505,33 @@ function SC.setBuilding(value)
  value=value==true and allowed()
  if not value then if state.enabled and SC.ownerSync then SC.ownerSync.pendingBuild=true end;state.enabled=false;if state.api then state.api.setEnabled(false)end;if state.prompt then state.prompt:Destroy();state.prompt=nil end;update();return false end
  local ok,why=pcall(function()
-  local builder=api();local net=SC.ownerSync;local shared=net and net.docs[tostring(ctx.player.UserId)]
-  if shared and(#builder.document().parts==0 or net.publishBlocked)then builder.import(shared)end
-  if net then net.publishBlocked=false end
+  local builder=api();local net=SC.ownerSync;local principal=net and net.buildOwner or ctx.player.UserId;local shared=net and net.docs[tostring(principal)]
+  if shared and(net.editingOwner~=principal or #builder.document().parts==0)then builder.sync(shared,true)
+  elseif SC.temporaryAccess and(not net or net.editingOwner~=principal)then builder.sync({format='HeadLockTrack',version=1,placeId=game.PlaceId,name='Build',parts={}},true)end
+  if net then net.attach()end
   builder.setEnabled(true);builder.openMenu();state.enabled=true
-  if net and shared and net.replicas[tostring(ctx.player.UserId)]then net.replicas[tostring(ctx.player.UserId)].folder:Destroy();net.replicas[tostring(ctx.player.UserId)]=nil end
  end)
  if not ok then report(tostring(why));return false end
  update();return true
 end
+function SC.setTemporaryAccess(value,principal)
+ value=value==true and not SC.isOwnerAccount(ctx.player)
+ local before=SC.temporaryAccess==true
+ if before==value and state.accessPrincipal==principal then return end
+ if before and(not value or state.accessPrincipal~=principal)then
+  SC.setBuilding(false)
+  if state.api then state.api.sync({format='HeadLockTrack',version=1,placeId=game.PlaceId,name='Build',parts={}},true)end
+  if SC.ownerSync then SC.ownerSync.detach()end
+  SC.rapidFirePower=100;SC.rapidFireEnabled=false
+  if SC.setAutoWin then SC.setAutoWin(false)end
+ end
+ SC.temporaryAccess=value;state.accessPrincipal=principal
+ if SC.refreshOwnerCategories then SC.refreshOwnerCategories()end
+ if SC.updateRapidFire then SC.updateRapidFire()end
+ update()
+end
 function state.save(name,saveId)
- if not allowed()or state.saveBusy then return end
+ if not ownerAllowed()or state.saveBusy then return end
  name=tostring(name or''):match('^%s*(.-)%s*$'):gsub('%c',''):sub(1,80)
  if name==''then report('Enter a name');return end
  local net=SC.ownerSync;if not net or not net.owner then report('Private owner access required');return end
@@ -3526,7 +3545,7 @@ function state.save(name,saveId)
  end)
 end
 function state.list()
- if not allowed()or state.listBusy then return end
+ if not ownerAllowed()or state.listBusy then return end
  local net=SC.ownerSync;if not net or not net.owner then report('Private owner access required');return end
  state.listBusy=true
  net.enqueue('list',{},function(success,data)
@@ -3536,7 +3555,7 @@ function state.list()
  end)
 end
 function state.load()
- if not allowed()or not state.selected or state.saveBusy then return end
+ if not ownerAllowed()or not state.selected or state.saveBusy then return end
  local chosen=state.selected;local net=SC.ownerSync
  if not net or not net.owner then report('Private owner access required');return end
  state.saveBusy=true;report('Loading')
@@ -3548,7 +3567,7 @@ function state.load()
  end)
 end
 function state.namePrompt()
- if not allowed()then return end
+ if not ownerAllowed()then return end
  if state.prompt then state.prompt:Destroy()end
  local make,button=ctx.make,ctx.button
  local frame=make('Frame',{Name='BuildNamePrompt',AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.fromOffset(300,156),BackgroundColor3=ctx.black,ZIndex=25,Active=true},ctx.gui);state.prompt=frame
@@ -3579,6 +3598,7 @@ function SC.drawBuilding(container)
  local list=make('ScrollingFrame',{Name='BuildSaves',Position=UDim2.fromOffset(0,134),Size=UDim2.new(1,-3,0,232),CanvasSize=UDim2.new(),BorderSizePixel=0,ScrollBarThickness=3,BackgroundTransparency=1,Visible=false},panel)
  local load=button('Load Build',panel);load.Name='LoadBuild';load.Position=UDim2.fromOffset(0,376);load.Size=UDim2.new(1,0,0,34)
  local status=make('TextLabel',{Name='BuildingStatus',Position=UDim2.fromOffset(0,420),Size=UDim2.new(1,0,0,64),BackgroundTransparency=1,TextWrapped=true,TextColor3=ctx.white,TextSize=13,Font=Enum.Font.Code},panel)
+ local cloud=ownerAllowed();save.Visible=cloud;saves.Visible=cloud;load.Visible=cloud
  local rows={};local last=''
  state.update=function()
   if not panel.Parent then state.update=nil;return end
@@ -3602,7 +3622,7 @@ function SC.drawBuilding(container)
  state.update();if state.enabled and state.api then state.api.openMenu()end
 end
 function SC.drawOwnerPanel(container)
- if not allowed()then return end
+ if not ownerAllowed()then return end
  local make,button=ctx.make,ctx.button
  local panel=make('Frame',{Size=UDim2.fromScale(1,1),BackgroundTransparency=1},container)
  make('TextLabel',{Text='Owner Panel',Size=UDim2.new(1,0,0,30),BackgroundTransparency=1,TextColor3=ctx.white,TextSize=20,Font=Enum.Font.Code,TextXAlignment=Enum.TextXAlignment.Left},panel)
@@ -3613,22 +3633,25 @@ function SC.drawOwnerPanel(container)
   if not panel.Parent then state.ownerUpdate=nil;return end
   local net=SC.ownerSync;status.Text=net and net.error or'Connecting'
   local users=net and net.roster or{};local visible={}
-  for _,user in ipairs(users)do table.insert(visible,{user.session,user.username,user.owner,user.actual.paused,user.actual.soundsPaused,user.pending})end
+  for _,user in ipairs(users)do table.insert(visible,{user.session,user.username,user.owner,user.actual.paused,user.actual.soundsPaused,user.pending,user.access})end
   local fingerprint=ctx.Http:JSONEncode(visible)
   if fingerprint==last then return end;last=fingerprint
   for _,row in ipairs(rows)do row:Destroy()end;rows={}
   local count=0
   for _,user in ipairs(users)do if not user.owner then
-   local frame=make('Frame',{Name='OwnerUser_'..user.session,Position=UDim2.fromOffset(0,count*92),Size=UDim2.new(1,-6,0,86),BackgroundTransparency=1},list);table.insert(rows,frame);count+=1
+   local frame=make('Frame',{Name='OwnerUser_'..user.session,Position=UDim2.fromOffset(0,count*128),Size=UDim2.new(1,-6,0,122),BackgroundTransparency=1},list);table.insert(rows,frame);count+=1
    make('TextLabel',{Text=user.username,Position=UDim2.fromOffset(0,0),Size=UDim2.new(.62,0,0,28),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,BackgroundTransparency=1,TextColor3=ctx.white,TextSize=14,Font=Enum.Font.Code},frame)
    local flags=(user.actual.paused and'Paused'or'Active')..(user.actual.soundsPaused and' / Muted'or'')..(user.pending and' …'or'')
    make('TextLabel',{Text=flags,Position=UDim2.new(.62,0,0,0),Size=UDim2.new(.38,0,0,28),BackgroundTransparency=1,TextColor3=ctx.white,TextSize=10,Font=Enum.Font.Code},frame)
    for i,item in ipairs({{'Pause','pause'},{'Resume','resume'},{'Mute','mute'},{'Unmute','unmute'},{'Kick','kick'}})do
     local b=button(item[1],frame);b.Name='Owner_'..item[2];b.Position=UDim2.new((i-1)/5,0,0,36);b.Size=UDim2.new(.2,-3,0,34);b.TextSize=11
-    b.Activated:Connect(function()if allowed()and net then net.command(user.session,item[2])end end)
+    b.Activated:Connect(function()if ownerAllowed()and net then net.command(user.session,item[2])end end)
    end
+   local access=button(user.access and'Revoke Access'or'Give Access',frame);access.Name='Owner_access';access.Position=UDim2.fromOffset(0,76);access.Size=UDim2.new(1,-3,0,32);access.TextSize=12
+   access.Activated:Connect(function()if ownerAllowed()and net then net.command(user.session,user.access and'revoke'or'grant')end end)
+   if user.room~=net.room and not user.access then access.Text='Different server';access.Active=false end
   end end
-  list.CanvasSize=UDim2.fromOffset(0,count*92)
+  list.CanvasSize=UDim2.fromOffset(0,count*128)
  end
  state.ownerUpdate()
 end
@@ -4065,6 +4088,30 @@ local function import(data)
  local ok,err=pcall(function()for id,d in pairs(after)do apply(id,d)end end)
  if not ok then for id,d in pairs(before)do apply(id,d)end;trackName=oldName;error(err,0)end
  trackName=data.name;push(before,after);selectPart(nil);draft();tell('Loaded '..#data.parts..' pieces.');return #data.parts
+end
+local function sync(data,resetHistory)
+ assert(not drag,'Finish the current edit first')
+ data=normalize(data)
+ local function signature(d)
+  local surf={};for _,key in ipairs(surfaces)do table.insert(surf,d.surfaces and d.surfaces[key]or'Smooth')end
+  return Http:JSONEncode({d.class,d.name,d.shape or'Block',d.size,d.cf,d.color,d.material,d.materialVariant or'',d.transparency or 0,d.reflectance or 0,d.canCollide~=false,d.canTouch==true,d.canQuery~=false,d.castShadow~=false,surf,d.physics or{}})
+ end
+ local incoming={};for _,part in ipairs(data.parts)do incoming[part.id]=part end
+ local affected={}
+ for id,p in pairs(objects)do
+  if not incoming[id]then affected[id]=true;apply(id,false)
+  elseif signature(record(p))~=signature(incoming[id])then affected[id]=true;apply(id,incoming[id])end
+ end
+ for id,part in pairs(incoming)do if not objects[id]then affected[id]=true;apply(id,part)end end
+ local function prune(stack)
+  for i=#stack,1,-1 do
+   local entry=stack[i]
+   for id in pairs(affected)do entry.before[id]=nil;entry.after[id]=nil end
+   if next(entry.before)==nil then table.remove(stack,i)end
+  end
+ end
+ if resetHistory then table.clear(history);table.clear(redo);selectPart(nil)else prune(history);prune(redo);selectionParts()end
+ trackName=data.name;changed=true;refresh();return #data.parts
 end
 local exportBox,exportWindow
 local function exportText()return PREFIX..Http:JSONEncode(document())end
@@ -4647,6 +4694,8 @@ function api.setEnabled(value)
 end
 api.openMenu=function()if ui.toolsEnabled then ui.showMain('Edit')end end
 api.isEnabled=function()return ui.toolsEnabled==true end
+api.isBusy=function()return drag~=nil end
+api.sync=sync
 function api.cleanup()
  if closed then return end
  cancelInteraction();pcall(draft);closed=true
@@ -4673,14 +4722,14 @@ end
 SC.installBuilding()
 SC.ownerSync=(function(SC,ctx)
 local Http=game:GetService('HttpService')
-local state={enabled=false,connected=false,owner=false,closed=false,busy=false,queue={},versions={},docs={},roster={},published={},lastDesired=0,replicas={},nextTick=0,elapsed=0,error='Connecting'}
+local state={enabled=false,connected=false,owner=false,canBuild=false,temporary=false,closed=false,busy=false,queue={},versions={},docs={},roster={},published={},lastDesired=0,replicas={},nextTick=0,elapsed=0,error='Connecting',buildOwner=ctx.player.UserId}
 local send=type(request)=='function'and request or type(http_request)=='function'and http_request or type(syn)=='table'and syn.request or type(http)=='table'and http.request
 state.close=function()state.closed=true end
 local function report(text)state.error=text;if ctx.update then ctx.update()end end
 if type(send)~='function'then report('Shared connection unavailable');return state end
 if type(game.JobId)~='string'or #game.JobId<8 then report('Shared needs a live server');return state end
 local function guid()return(Http:GenerateGUID(false):gsub('[{}%-]',''))end
-state.enabled=true;state.session=guid();local secret=guid();local room=tostring(game.PlaceId)..':'..game.JobId
+state.enabled=true;state.session=guid();local secret=guid();local room=tostring(game.PlaceId)..':'..game.JobId;state.room=room
 local access=_G.HeadLockOwnerAccess
 if SC.isOwnerAccount(ctx.player)and(type(access)~='table'or type(access.key)~='string')and type(readfile)=='function'then
  local ok,value=pcall(function()return Http:JSONDecode(readfile('HeadLockOwnerAccess_v1.json'))end)
@@ -4706,8 +4755,7 @@ local function sigs(doc)
  local out={};for _,part in ipairs(doc.parts or{})do out[part.id]=fingerprint(part)end;return out
 end
 local function render(build)
- local localApi=ctx.builderApi()
- if build.owner==ctx.player.UserId and localApi then
+ if build.owner==state.editingOwner and ctx.builderApi()then
   local old=state.replicas[tostring(build.owner)];if old then old.folder:Destroy();state.replicas[tostring(build.owner)]=nil end
   return
  end
@@ -4734,14 +4782,53 @@ local function render(build)
  end
  for id,part in pairs(r.parts)do if not seen[id]then part:Destroy();r.parts[id]=nil;r.signatures[id]=nil end end
 end
-local function receive(data)
+local function reconcile(doc,reference)
+ local api=ctx.builderApi()
+ if state.editingOwner==state.buildOwner and api then
+  if api.isBusy()then state.deferred={doc=doc,reference=state.deferred and state.deferred.reference or reference};return end
+  local current=api.document();local currentSigs=sigs(current);local base=reference.parts;local parts={}
+  for _,part in ipairs(doc.parts)do parts[part.id]=part end
+  for id in pairs(base)do if not currentSigs[id]then parts[id]=nil end end
+  for _,part in ipairs(current.parts)do if currentSigs[part.id]~=base[part.id]then parts[part.id]=part end end
+  local merged={format=doc.format,version=doc.version,placeId=doc.placeId,name=current.name~=reference.name and current.name or doc.name,parts={}}
+  for _,part in pairs(parts)do table.insert(merged.parts,part)end
+  api.sync(merged)
+ end
+ state.published=sigs(doc);state.publishedName=doc.name;state.deferred=nil
+end
+function state.attach()
+ state.editingOwner=state.buildOwner;state.deferred=nil
+ local doc=state.docs[tostring(state.buildOwner)]
+ state.published=doc and sigs(doc)or{};state.publishedName=doc and doc.name or nil
+ local replica=state.replicas[tostring(state.buildOwner)];if replica then replica.folder:Destroy();state.replicas[tostring(state.buildOwner)]=nil end
+end
+function state.detach()
+ state.editingOwner=nil;state.deferred=nil;state.pendingBuild=false;state.published={};state.publishedName=nil
+ for key,doc in pairs(state.docs)do render({owner=tonumber(key),doc=doc})end
+end
+local function receive(data,sent)
  if state.closed then return end
- state.connected=true;state.owner=data.self and data.self.owner==true or false;state.error=state.owner and'Connected'or(SC.isOwnerAccount(ctx.player)and'Private owner access required'or'Connected')
+ local identity=data.self or{};local was=state.buildOwner
+ state.connected=true;state.owner=identity.owner==true;state.canBuild=identity.building==true or state.owner;state.temporary=identity.temporary==true
+ state.buildOwner=identity.buildOwner or ctx.player.UserId;state.permissionUntil=os.clock()+10
+ if SC.setTemporaryAccess then SC.setTemporaryAccess(state.temporary,state.buildOwner)end
+ if was~=state.buildOwner then state.deferred=nil end
+ state.error=state.owner and'Connected'or(state.temporary and'Temporary access'or(SC.isOwnerAccount(ctx.player)and'Private owner access required'or'Connected'))
  if type(data.roster)=='table'then state.roster=data.roster end
+ local reference=sent and{parts=sigs(sent),name=sent.name}or{parts=state.published,name=state.publishedName}
+ local publication=data.publication
+ if publication then
+  state.versions[tostring(state.buildOwner)]=publication.revision
+  if publication.doc then
+   state.docs[tostring(state.buildOwner)]=publication.doc
+   reconcile(publication.doc,publication.conflict and{parts=state.published,name=state.publishedName}or reference)
+  elseif sent and not publication.conflict then state.published=sigs(sent);state.publishedName=sent.name end
+  if not publication.conflict then state.pendingBuild=false end
+ end
  for _,build in ipairs(data.builds or{})do
   if type(build)=='table'and type(build.owner)=='number'and type(build.doc)=='table'and build.doc.placeId==game.PlaceId then
    local key=tostring(build.owner);state.versions[key]=build.revision;state.docs[key]=build.doc
-   if build.owner==ctx.player.UserId then state.published=sigs(build.doc);state.publishedName=build.doc.name end
+   if build.owner==state.buildOwner and not(publication and publication.doc)then reconcile(build.doc,reference)end
    render(build)
   end
  end
@@ -4766,21 +4853,30 @@ function state.command(target,action)
  return state.enqueue('command',{target=target,action=action,requestId=guid()})
 end
 function state.adopt(doc)
- local key=tostring(ctx.player.UserId);state.docs[key]=doc;state.published=sigs(doc);state.publishedName=doc.name
+ local key=tostring(state.buildOwner);state.docs[key]=doc;state.published=sigs(doc);state.publishedName=doc.name
+end
+local function expire()
+ if state.temporary and os.clock()>=(state.permissionUntil or 0)then
+  state.temporary=false;state.canBuild=false;if SC.setTemporaryAccess then SC.setTemporaryAccess(false,ctx.player.UserId)end
+  report('Temporary access needs a connection')
+ end
 end
 function state.tick()
  if state.closed or not state.enabled then return end
+ expire()
+ local api=ctx.builderApi()
+ if state.deferred and api and not api.isBusy()then reconcile(state.deferred.doc,state.deferred.reference)end
  local item=state.connected and table.remove(state.queue,1)or nil
  local op=not state.connected and'join'or item and item.op or'poll';local fields=item and item.fields or{}
  local snapshot
- if op=='poll'and state.owner and(ctx.buildingEnabled()or state.pendingBuild)and not state.publishBlocked then
-  local api=ctx.builderApi()
-  if api then
-   snapshot=api.document();local current=sigs(snapshot);local upsert,removed={},{}
-   for _,part in ipairs(snapshot.parts)do if current[part.id]~=state.published[part.id]then table.insert(upsert,part)end end
-   for id in pairs(state.published)do if not current[id]then table.insert(removed,id)end end
-   if #upsert>0 or #removed>0 or snapshot.name~=state.publishedName then op='publish';fields={baseVersion=state.versions[tostring(ctx.player.UserId)]or 0,upsert=upsert,removed=removed,name=snapshot.name}end
-  end
+ if op=='poll'and state.canBuild and(ctx.buildingEnabled()or state.pendingBuild)and state.editingOwner==state.buildOwner and api and not api.isBusy()then
+  snapshot=api.document();local current=sigs(snapshot);local upsert,removed={},{}
+  for _,part in ipairs(snapshot.parts)do if current[part.id]~=state.published[part.id]then table.insert(upsert,part)end end
+  for id in pairs(state.published)do if not current[id]then table.insert(removed,id)end end
+  if #upsert>0 or #removed>0 or snapshot.name~=state.publishedName then
+   op='publish';fields={baseVersion=state.versions[tostring(state.buildOwner)]or 0,buildOwner=state.buildOwner,merge=true,upsert=upsert,removed=removed}
+   if snapshot.name~=state.publishedName then fields.name=snapshot.name end
+  else snapshot=nil;state.pendingBuild=false end
  end
  local ok,data=pcall(rpc,op,fields)
  if state.closed then return end
@@ -4789,15 +4885,7 @@ function state.tick()
   if item and item.callback then item.callback(false,state.error)end
   return
  end
- if data.publication then
-  local pub=data.publication;local key=tostring(ctx.player.UserId)
-  state.versions[key]=pub.revision
-  if pub.conflict then
-   state.docs[key]=pub.doc;state.published=sigs(pub.doc);state.publishedName=pub.doc.name;state.publishBlocked=true
-  elseif snapshot then state.published=sigs(snapshot);state.publishedName=snapshot.name;state.pendingBuild=false end
- end
- receive(data)
- if data.publication and data.publication.conflict then report('Shared build changed. Toggle Building off/on to reload.')end
+ receive(data,snapshot)
  if item and item.callback then item.callback(true,data)end
 end
 function state.close()
@@ -4809,7 +4897,7 @@ end
 state.sharedFolder=shared;state.receive=receive
 ctx.connect(ctx.Run.Heartbeat,function(dt)
  if state.closed or not SC.authenticated then return end
- state.elapsed+=dt;if state.elapsed<.2 or state.busy or os.clock()<state.nextTick then return end
+ expire();state.elapsed+=dt;if state.elapsed<.2 or state.busy or os.clock()<state.nextTick then return end
  state.elapsed=0;state.busy=true;state.nextTick=os.clock()+(ctx.buildingEnabled()and .65 or 1.8)
  task.spawn(function()local ok,err=pcall(state.tick);state.busy=false;if not ok then state.connected=false;report(tostring(err))end;if not state.connected then state.nextTick=os.clock()+3 end end)
 end)
@@ -4823,16 +4911,14 @@ addCategory('Owner Panel',SC.drawOwnerPanel)
 function SC.refreshOwnerCategories()
  local owner=SC.ownerFeatures and SC.isOwnerAccount(player)
  for _,entry in ipairs(categoryEntries)do
-  local private=entry.name=='Building'or entry.name=='Owner Panel'
-  entry.button.Visible=entry.section==SC.activeGame and(not private or owner)
+  local visible=entry.name=='Building'and SC.canBuild()or entry.name=='Owner Panel'and owner or(entry.name~='Building'and entry.name~='Owner Panel')
+  entry.button.Visible=entry.section==SC.activeGame and visible
  end
- if not owner then
-  if SC.setBuilding then SC.setBuilding(false)end
-  if SC.selectedCategory=='Building'or SC.selectedCategory=='Owner Panel'then SC.selectAimbot()end
- end
+ if not SC.canBuild()and SC.setBuilding then SC.setBuilding(false)end
+ if(SC.selectedCategory=='Building'and not SC.canBuild())or(SC.selectedCategory=='Owner Panel'and not owner)then SC.selectAimbot()end
 end
 SC.refreshOwnerCategories()
-_G.HeadLockMenuVersion="2026-11-27-building-owner"
+_G.HeadLockMenuVersion="2026-11-28-shared-building-access"
 
 SC.watchOwnerEmotes()
 
