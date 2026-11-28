@@ -57,3 +57,27 @@ test('temporary session access shares the owner build without owner powers and c
  now+=46000;await rpc(owner,'join');assert.equal((await rpc(friend,'join')).self.building,false,'expired session retained access');
  const elsewhere={...viewer,session:'elsewhere_session',room:'12345:other_server_123'};await rpc(elsewhere,'join');await assert.rejects(rpc(owner,'command',{target:elsewhere.session,action:'grant'}),/target/);
 });
+test('all verified owners share saves per place and migrate original account saves without resurrection',async()=>{
+ const redis=memoryRedis();const rpc=(who,op,fields={})=>control(redis,{...who,op,...fields},env);
+ const alt={...owner,user:101,username:'nonobearbear18',session:'alternate_owner_session',secret:'alternate_owner_secret'};
+ const legacyIndex='headlock:saves:100:12345';
+ redis.values.set(legacyIndex,JSON.stringify([{id:'legacy_save_123',name:'Original road',updatedAt:1,parts:1}]));
+ redis.values.set(legacyIndex+':legacy_save_123',JSON.stringify({id:'legacy_save_123',name:'Original road',createdAt:1,updatedAt:1,doc,parts:1}));
+ await rpc(owner,'join');await rpc(alt,'join');await rpc(viewer,'join');
+ const migrated=(await rpc(owner,'list')).saves;assert.equal(migrated.length,1);assert(!JSON.stringify(migrated).includes('storageKey'));
+ assert.deepEqual((await rpc(alt,'list')).saves,migrated);
+ assert.deepEqual((await rpc(alt,'load',{saveId:migrated[0].id})).doc,document(doc,12345));
+ assert.equal((await rpc(owner,'load',{saveId:'legacy_save_123'})).saveId,migrated[0].id);
+ await rpc(alt,'save',{saveId:'new_shared_save_123',name:'Alt build',doc});
+ assert.equal((await rpc(owner,'list')).saves.length,2);
+ await rpc(owner,'save',{saveId:'new_shared_save_123',name:'Updated by main',doc:{...doc,parts:[]}});
+ assert.equal((await rpc(alt,'load',{saveId:'new_shared_save_123'})).doc.parts.length,0);
+ const other={...alt,room:'54321:other_place_room',session:'other_map_owner_session'};await rpc(other,'join');assert.deepEqual((await rpc(other,'list')).saves,[]);
+ await rpc(owner,'command',{target:viewer.session,action:'grant'});await assert.rejects(rpc(viewer,'list'),/owner authorization/);await assert.rejects(rpc(viewer,'load',{saveId:'new_shared_save_123'}),/owner authorization/);
+ await rpc(alt,'delete-save',{saveId:migrated[0].id});assert.equal((await rpc(owner,'list')).saves.length,1);await assert.rejects(rpc(owner,'load',{saveId:'legacy_save_123'}),/save missing/);
+ const legacyAlt='headlock:saves:101:12345';redis.values.set(legacyAlt,JSON.stringify([{id:'legacy_save_123',name:'Different alt road',updatedAt:2,parts:1}]));redis.values.set(legacyAlt+':legacy_save_123',JSON.stringify({doc}));
+ const third={...alt,user:102,username:'nonobearbear19',session:'third_owner_session'};const thirdIndex='headlock:saves:102:12345';
+ redis.values.set(thirdIndex,JSON.stringify([{id:'legacy_save_123',name:'Third owner road',updatedAt:2,parts:1}]));redis.values.set(thirdIndex+':legacy_save_123',JSON.stringify({doc}));
+ await rpc(third,'join');assert.equal((await rpc(third,'list')).saves.length,2);assert.equal((await rpc(owner,'list')).saves.length,2);
+ assert.equal(JSON.parse(redis.values.get(legacyIndex)).length,1,'legacy index was destroyed');
+});
