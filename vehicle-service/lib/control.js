@@ -44,6 +44,7 @@ export async function control(redis,input,env=process.env,clock=Date.now){
  const entry=await update(redis,sessionsKey,state=>{
   state??={sessions:{}};
   for(const [key,s]of Object.entries(state.sessions))if(s.at<now-45000)delete state.sessions[key];
+  for(const s of Object.values(state.sessions))if(s.grant&&!state.sessions[s.grant.session]?.owner)delete s.grant;
   let s=Object.hasOwn(state.sessions,input.session)?state.sessions[input.session]:null;
   if(input.op==='join'){
    check(!s||s.secret===input.secret,'authorization');check(s||Object.keys(state.sessions).length<256,'room full');
@@ -57,36 +58,40 @@ export async function control(redis,input,env=process.env,clock=Date.now){
   s.at=now;
   if(input.actual&&typeof input.actual==='object')s.actual={paused:input.actual.paused===true,soundsPaused:input.actual.soundsPaused===true};
   if(input.op==='command'){
-   check(s.owner,'owner authorization');check(id(input.target)&&['pause','resume','mute','unmute','kick'].includes(input.action),'command');
+   check(s.owner,'owner authorization');check(id(input.target)&&['pause','resume','mute','unmute','kick','grant','revoke'].includes(input.action),'command');
    const target=Object.hasOwn(state.sessions,input.target)?state.sessions[input.target]:null;check(target&&!target.owner,'target');
    if(input.action==='pause'||input.action==='resume')target.desired.paused=input.action==='pause';
    if(input.action==='mute'||input.action==='unmute')target.desired.soundsPaused=input.action==='mute';
    if(input.action==='kick')target.desired.kick=hash(input.requestId??String(now));
+   if(input.action==='grant'){check(target.room===s.room,'target');target.grant={by:s.user,session:input.session,username:s.username};}
+   if(input.action==='revoke')delete target.grant;
    target.desired.revision++;target.desired.by=s.user;
   }
-  const self={user:s.user,username:s.username,owner:s.owner};
-  const roster=s.owner?Object.entries(state.sessions).map(([session,p])=>({session,user:p.user,username:p.username,room:p.room,owner:p.owner,actual:p.actual,pending:(p.ack??0)<p.desired.revision,at:p.at})).sort((a,b)=>a.username.localeCompare(b.username)):undefined;
+  const self={user:s.user,username:s.username,owner:s.owner,building:s.owner||!!s.grant,temporary:!s.owner&&!!s.grant,buildOwner:s.grant?.by??s.user,buildUsername:s.grant?.username??s.username};
+  const roster=s.owner?Object.entries(state.sessions).map(([session,p])=>({session,user:p.user,username:p.username,room:p.room,owner:p.owner,access:!!p.grant,actual:p.actual,pending:(p.ack??0)<p.desired.revision,at:p.at})).sort((a,b)=>a.username.localeCompare(b.username)):undefined;
   if(Number.isSafeInteger(input.ack)&&input.ack>=0)s.ack=Math.min(input.ack,s.desired.revision);
   const result={self,desired:s.desired,...(roster?{roster}:{})};
-  if(input.op==='leave')delete state.sessions[input.session];
+  if(input.op==='leave'){delete state.sessions[input.session];for(const p of Object.values(state.sessions))if(p.grant?.session===input.session){delete p.grant;p.desired.revision++;}}
   return {state,result};
  });
  const allowed=new Set(['join','poll','command','publish','save','list','load','delete-save','leave']);check(allowed.has(input.op),'operation');
  const base={ok:true,now,...entry};
  if(input.op==='leave')return base;
- if(['publish','save','list','load','delete-save'].includes(input.op))check(entry.self.owner,'owner authorization');
+ if(input.op==='publish')check(entry.self.building,'owner authorization');
+ if(['save','list','load','delete-save'].includes(input.op))check(entry.self.owner,'owner authorization');
  const roomKey='headlock:build:room:'+hash(input.room);
  if(input.op==='publish'){
+  check(input.buildOwner==null||input.buildOwner===entry.self.buildOwner,'owner authorization');
   check(Number.isSafeInteger(input.baseVersion)&&input.baseVersion>=0&&Array.isArray(input.upsert)&&input.upsert.length<=LIMIT&&Array.isArray(input.removed)&&input.removed.length<=LIMIT,'build');
   base.publication=await update(redis,roomKey,state=>{
-   state??={owners:{}};const key=String(entry.self.user);const previous=Object.hasOwn(state.owners,key)?state.owners[key]:{revision:0,doc:{format:'HeadLockTrack',version:1,placeId:place,name:'Build',parts:[]}};
-   if(input.baseVersion!==previous.revision)return {state,result:{conflict:true,revision:previous.revision,doc:previous.doc}};
+   state??={owners:{}};const key=String(entry.self.buildOwner);const previous=Object.hasOwn(state.owners,key)?state.owners[key]:{revision:0,doc:{format:'HeadLockTrack',version:1,placeId:place,name:'Build',parts:[]}};
+   if(input.baseVersion!==previous.revision&&!(input.merge===true&&input.baseVersion<previous.revision))return {state,result:{conflict:true,revision:previous.revision,doc:previous.doc}};
    const map=new Map(previous.doc.parts.map(p=>[p.id,p]));for(const key of input.removed){check(typeof key==='string'&&key.length<=100,'build');map.delete(key);}
    for(const part of input.upsert){check(part&&typeof part.id==='string','build');map.set(part.id,part);}
    const doc=document({...previous.doc,name:input.name??previous.doc.name,parts:[...map.values()]},place);
    const total=Object.entries(state.owners).reduce((n,[id,v])=>n+(id===key?0:v.doc.parts.length),doc.parts.length);check(total<=3000,'room build limit');
-   state.owners[key]={revision:previous.revision+1,doc,username:entry.self.username,at:now};
-   return {state,result:{revision:previous.revision+1}};
+   state.owners[key]={revision:previous.revision+1,doc,username:entry.self.buildUsername,at:now};
+   return {state,result:{revision:previous.revision+1,doc}};
   },21600);
  }
  const saveIndex='headlock:saves:'+entry.self.user+':'+place;
