@@ -5,12 +5,12 @@ const mock=fs.readFileSync('tests/fixtures/roblox_mock.luau','utf8');const prelu
 const expose=fs.readFileSync('tests/fixtures/state_expose.luau','utf8');const source=fs.readFileSync('HeadLockMenu_Core.lua','utf8').replace('SC.watchOwnerEmotes()\n\nend\nlocal __ok',expose+'\nSC.watchOwnerEmotes()\n\nend\nlocal __ok');
 function plain(v){if(v&&typeof v.keys==='function'&&typeof v.get==='function'){const keys=v.keys();if(keys.length===0)return[];if(keys.every(k=>typeof k==='number'))return keys.sort((a,b)=>a-b).map(k=>plain(v.get(k)));return Object.fromEntries(keys.map(k=>[k,plain(v.get(k))]));}return v;}
 function literal(v){if(v===null)return'nil';if(Array.isArray(v))return'{'+v.map(literal).join(',')+'}';if(typeof v==='object')return'{'+Object.entries(v).map(([k,x])=>'['+JSON.stringify(k)+']='+literal(x)).join(',')+'}';return JSON.stringify(v);}
-async function client(owner){let vm;vm=await LuauState.createAsync({print:console.log,_guid:()=>randomUUID(),_encode:v=>JSON.stringify(plain(v)),_decode:async text=>(await vm.loadstring('return '+literal(JSON.parse(text)),'JSON bridge',true)())[0],_request:async text=>{try{return JSON.stringify(await control(redis,JSON.parse(text),env));}catch(e){return JSON.stringify({ok:false,error:e.message});}}});
- await vm.loadstring(mock+'\n'+prelude+'\n'+builderMock+`\n game.JobId='isolated_e2e_room_123';TestEnv.localPlayer.UserId=${owner?100:200};TestEnv.localPlayer.Name='${owner?'nonobearbear17':'OrdinaryUser'}';${owner?`_G.HeadLockOwnerAccess={key='${key}'}`:''}
+async function client(owner,user=200){let vm;vm=await LuauState.createAsync({print:console.log,_guid:()=>randomUUID(),_encode:v=>JSON.stringify(plain(v)),_decode:async text=>(await vm.loadstring('return '+literal(JSON.parse(text)),'JSON bridge',true)())[0],_request:async text=>{try{return JSON.stringify(await control(redis,JSON.parse(text),env));}catch(e){return JSON.stringify({ok:false,error:e.message});}}});
+ await vm.loadstring(mock+'\n'+prelude+'\n'+builderMock+`\n game.JobId='isolated_e2e_room_123';TestEnv.localPlayer.UserId=${owner?100:user};TestEnv.localPlayer.Name='${owner?'nonobearbear17':user===200?'OrdinaryUser':'FriendUser'}';${owner?`_G.HeadLockOwnerAccess={key='${key}'}`:''}
  request=function(options)return{StatusCode=200,Body=_request(options.Body)}end
  `+source+'\nassert(_G.HeadLockMenuExecutionReady,table.concat(TestEnv.warnings," | "))','Complete main menu',true)();return vm;}
 async function run(vm,code){return await vm.loadstring(code,'Building/owner end-to-end checks',true)();}
-let owner,viewer,reloaded;
+let owner,viewer,reloaded,friend,fresh;
 try{
  owner=await client(true);viewer=await client(false);
  await run(owner,`local T=__T;local SC=T.SC;SC.authenticated=true;SC.ownerSync.tick();assert(SC.ownerSync.owner,SC.ownerSync.error)
@@ -56,6 +56,47 @@ try{
   await run(owner,`local SC=__T.SC;local target;for _,u in ipairs(SC.ownerSync.roster)do if not u.owner then target=u.session end end;assert(SC.ownerSync.command(target,'${action}'));SC.ownerSync.tick()`);
   await run(viewer,`local SC=__T.SC;SC.ownerSync.tick();${expected}`);
  }
+ friend=await client(false,201);await run(friend,`local SC=__T.SC;SC.authenticated=true;SC.ownerSync.tick()`);
+ await run(owner,`local SC=__T.SC;SC.ownerSync.tick();TestEnv.click(__T.main,'  Owner Panel')
+ local row=__T.content:FindFirstChild('OwnerUser_'..SC.ownerSync.roster[2].session,true)
+ for _,u in ipairs(SC.ownerSync.roster)do if u.user==200 then row=__T.content:FindFirstChild('OwnerUser_'..u.session,true)end end
+ assert(row);TestEnv.click(row,'Give Access');SC.ownerSync.tick()
+ local target;for _,u in ipairs(SC.ownerSync.roster)do if u.user==201 then target=u.session end end;assert(target);SC.ownerSync.command(target,'grant');SC.ownerSync.tick()
+ local candidate=TestEnv.addPlayer('OrdinaryUser',200,10,300);assert(SC.canSelectPlayer(candidate),'temporary friend acquired target immunity')
+ `);
+ for(const vm of [viewer,friend])await run(vm,`local SC=__T.SC;SC.ownerSync.tick();assert(SC.temporaryAccess and not SC.ownerSync.owner);assert(SC.rapidFireMax()==1000)
+ assert(not SC.isOwnerAccount(TestEnv.localPlayer));SC.setOwnerFeatures(true);assert(not SC.ownerFeatures)
+ assert(__T.main:FindFirstChild('Category_Building',true).Visible and not __T.main:FindFirstChild('Category_Owner Panel',true).Visible)
+ TestEnv.click(__T.main,'  Building');TestEnv.click(__T.content,'OFF');assert(SC.building.enabled)
+ assert(not __T.content:FindFirstChild('SaveBuild',true).Visible,'temporary access exposed owner saves')
+ assert(#SC.building.api.document().parts==1,'owner build was not editable')
+ SC.rapidFirePower=1000;SC.rapidFireEnabled=true
+ assert(not SC.ownerSync.command('arbitrary_session','grant'),'friend acquired delegation rights')
+ `);
+ await run(owner,`local SC=__T.SC;SC.setBuilding(true);_G.OwnerOriginal=SC.building.api.document().parts[1].id;SC.building.api.add('Block',CFrame.new(20,8,4))`);
+ await run(viewer,`local api=__T.SC.building.api;api.add('Block',CFrame.new(30,8,4));_G.MyAdded=api.document().parts;__T.SC.ownerSync.tick()`);
+ await run(owner,`__T.SC.ownerSync.tick()`);
+ await run(friend,`local api=__T.SC.building.api;api.add('Block',CFrame.new(40,8,4));__T.SC.ownerSync.tick()`);
+ for(const vm of [owner,viewer,friend])await run(vm,`local SC=__T.SC;SC.ownerSync.tick();assert(#SC.building.api.document().parts==4,'concurrent shared adds were lost')`);
+ await run(viewer,`local SC=__T.SC;local api=SC.building.api;local ramp
+ for _,p in pairs(api.parts)do if p.ClassName=='WedgePart'then ramp=p end end
+ assert(ramp);api.select(ramp);api.edit(function(p)p.Color=Color3.fromRGB(170,90,30)end);SC.ownerSync.tick()`);
+ await run(owner,`local SC=__T.SC;SC.ownerSync.tick();local p=SC.building.api.parts[_G.OwnerOriginal];assert(p and math.abs(p.Color.R-170/255)<1e-8,'friend could not edit owner block')`);
+ await run(friend,`local SC=__T.SC;SC.ownerSync.tick();local api=SC.building.api;local ramp;for _,p in pairs(api.parts)do if p.ClassName=='WedgePart'then ramp=p end end;api.select(ramp);api.delete();SC.ownerSync.tick()`);
+ await run(owner,`local SC=__T.SC;SC.ownerSync.tick();assert(SC.building.api.parts[_G.OwnerOriginal]==nil,'friend could not delete owner block')
+ TestEnv.click(__T.main,'  Owner Panel');local target;for _,u in ipairs(SC.ownerSync.roster)do if u.user==200 then target=u.session end end
+ local row=__T.content:FindFirstChild('OwnerUser_'..target,true);assert(row);TestEnv.click(row,'Revoke Access');SC.ownerSync.tick()`);
+ await run(viewer,`local SC=__T.SC;TestEnv.click(__T.main,'  PVP');SC.ownerSync.tick()
+ assert(not SC.temporaryAccess and not SC.building.enabled and not SC.building.api.isEnabled())
+ assert(SC.rapidFirePower==100 and not SC.rapidFireEnabled,'revocation did not restore default firing')
+ assert(TestEnv.find(__T.content,'100% (old max)','TextLabel'),'revocation left stale fire-rate slider')
+ assert(not __T.main:FindFirstChild('Category_Building',true).Visible and not SC.setBuilding(true))
+ local tools=0;for _ in pairs(SC.building.api.tools)do tools+=1 end;assert(tools==0,'revocation left tools')
+ local replicas=0;for _,p in ipairs(SC.ownerSync.sharedFolder:GetDescendants())do if p:IsA('BasePart')then replicas+=1 end end;assert(replicas==3,'revocation hid or duplicated shared build')
+ `);
+ fresh=await client(false,201);await run(fresh,`local SC=__T.SC;SC.authenticated=true;SC.ownerSync.tick();assert(not SC.temporaryAccess and not SC.canBuild(),'relaunch retained temporary access');_G.HeadLockMenuCleanup()`);
+ await run(friend,`local SC=__T.SC;SC.ownerSync.permissionUntil=0;SC.ownerSync.tick();assert(not SC.building.enabled and SC.rapidFirePower==100 and not SC.rapidFireEnabled,'offline access did not expire');_G.HeadLockMenuCleanup()`);
+ console.log('PASS temporary Give/Revoke buttons, shared concurrent edits across three clients, editing/deleting owner blocks, default firing restoration, readonly replicas, session-only access, no immunity or Owner Panel and fail-closed expiry');
  await run(owner,`local SC=__T.SC;SC.setBuilding(true);SC.setOwnerFeatures(false);assert(not SC.building.enabled and not __T.main:FindFirstChild('Category_Building',true).Visible)
  _G.HeadLockMenuCleanup();assert(SC.ownerSync.closed and SC.building.api==nil)
  `);
@@ -65,4 +106,4 @@ try{
  await run(viewer,`_G.HeadLockMenuCleanup()`);
  assert([...values.keys()].some(k=>k.startsWith('headlock:saves:100:')));
  console.log('PASS complete main-menu owner gates, inventory ON/OFF, removed shortcut, two-client live build create/edit/delete/load, exact persistent named saves across script restarts, all five owner actions and paused-client resume');
-}finally{owner?.destroy();viewer?.destroy();reloaded?.destroy();}
+}finally{owner?.destroy();viewer?.destroy();reloaded?.destroy();friend?.destroy();fresh?.destroy();}
