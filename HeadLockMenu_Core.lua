@@ -3554,17 +3554,34 @@ function state.list()
   update()
  end)
 end
-function state.load()
- if not ownerAllowed()or not state.selected or state.saveBusy then return end
- local chosen=state.selected;local net=SC.ownerSync
+function state.load(chosen)
+ if not ownerAllowed()or state.saveBusy then return end
+ chosen=type(chosen)=='table'and chosen or state.selected;if not chosen then report('Choose a save');return end
+ local net=SC.ownerSync
  if not net or not net.owner then report('Private owner access required');return end
  state.saveBusy=true;report('Loading')
  net.enqueue('load',{saveId=chosen.id},function(success,data)
   state.saveBusy=false
   if not success then report('Load failed: '..tostring(data));return end
-  local ok,why=pcall(function()api().import(data.doc)end)
+  if not ownerAllowed()then return end
+  local ok,why=pcall(function()local builder=api();local shared=net.docs[tostring(net.buildOwner)];if net.editingOwner~=net.buildOwner and shared then builder.sync(shared,true)end;net.attach();builder.import(data.doc)end)
   if ok then net.pendingBuild=true;report('Loaded '..chosen.name)else report('Load failed: '..tostring(why))end
  end)
+end
+function state.loadPrompt(chosen)
+ if not ownerAllowed()or state.saveBusy then return end
+ chosen=chosen or state.selected;if not chosen then report('Choose a save');return end
+ if state.prompt then state.prompt:Destroy()end
+ local make,button=ctx.make,ctx.button
+ local frame=make('Frame',{Name='BuildLoadPrompt',AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.fromOffset(300,178),BackgroundColor3=ctx.black,ZIndex=25,Active=true},ctx.gui);state.prompt=frame
+ make('UIStroke',{Color=ctx.white,Thickness=1},frame)
+ make('TextLabel',{Text='Would you like to load this save?',Position=UDim2.fromOffset(12,10),Size=UDim2.new(1,-24,0,48),BackgroundTransparency=1,TextWrapped=true,TextColor3=ctx.white,TextSize=16,Font=Enum.Font.Code,ZIndex=26},frame)
+ make('TextLabel',{Text=chosen.name,Position=UDim2.fromOffset(12,62),Size=UDim2.new(1,-24,0,34),BackgroundTransparency=1,TextTruncate=Enum.TextTruncate.AtEnd,TextColor3=ctx.white,TextSize=14,Font=Enum.Font.Code,ZIndex=26},frame)
+ local yes=button('Yes',frame);yes.Name='ConfirmLoadBuild';yes.Position=UDim2.fromOffset(12,124);yes.Size=UDim2.fromOffset(130,34);yes.ZIndex=26
+ local cancel=button('Cancel',frame);cancel.Position=UDim2.fromOffset(158,124);cancel.Size=UDim2.fromOffset(130,34);cancel.ZIndex=26
+ local function close()frame:Destroy();if state.prompt==frame then state.prompt=nil end end
+ yes.Activated:Connect(function()if state.prompt~=frame then return end;close();state.load(chosen)end)
+ cancel.Activated:Connect(close)
 end
 function state.namePrompt()
  if not ownerAllowed()then return end
@@ -3610,7 +3627,7 @@ function SC.drawBuilding(container)
    for i,item in ipairs(state.saves)do
     local row=button(item.name,list);row.Name='BuildSave_'..item.id;row.Position=UDim2.fromOffset(0,(i-1)*38);row.Size=UDim2.new(1,-6,0,34);row.TextXAlignment=Enum.TextXAlignment.Left;row.TextTruncate=Enum.TextTruncate.AtEnd
     local selected=state.selected and state.selected.id==item.id;row.BackgroundColor3=selected and ctx.white or ctx.black;row.TextColor3=selected and ctx.black or ctx.white
-    row.Activated:Connect(function()state.selected=item;update()end);table.insert(rows,row)
+    row.Activated:Connect(function()state.selected=item;update();state.loadPrompt(item)end);table.insert(rows,row)
    end
    list.CanvasSize=UDim2.fromOffset(0,#state.saves*38)
   end
@@ -3618,7 +3635,7 @@ function SC.drawBuilding(container)
  toggle.Activated:Connect(function()SC.setBuilding(not state.enabled)end)
  save.Activated:Connect(function()state.namePrompt()end)
  saves.Activated:Connect(function()list.Visible=not list.Visible;if list.Visible then state.list()end end)
- load.Activated:Connect(state.load)
+ load.Activated:Connect(function()state.loadPrompt()end)
  state.update();if state.enabled and state.api then state.api.openMenu()end
 end
 function SC.drawOwnerPanel(container)
