@@ -38,7 +38,11 @@ try{
  api.clear();SC.ownerSync.tick();assert(#api.document().parts==0)
  `);
  await run(viewer,`local SC=__T.SC;SC.ownerSync.tick();local n=0;for _,p in ipairs(SC.ownerSync.sharedFolder:GetDescendants())do if p:IsA('BasePart')then n+=1 end end;assert(n==0,'shared deletion did not arrive')`);
- await run(owner,`local SC=__T.SC;SC.building.selected=SC.building.saves[1];SC.building.load();SC.ownerSync.tick();SC.ownerSync.tick()
+ await run(owner,`local SC=__T.SC;TestEnv.click(__T.content,'Saves');SC.ownerSync.tick()
+ local row=__T.content:FindFirstChild('BuildSave_'..SC.building.saves[1].id,true);assert(row);row.Activated:Fire()
+ local prompt=assert(__T.gui:FindFirstChild('BuildLoadPrompt'));assert(TestEnv.find(prompt,'Would you like to load this save?','TextLabel'))
+ assert(#SC.building.api.document().parts==0,'tapping save loaded without confirmation');TestEnv.click(prompt,'Cancel');assert(not __T.gui:FindFirstChild('BuildLoadPrompt'));assert(#SC.building.api.document().parts==0)
+ row=__T.content:FindFirstChild('BuildSave_'..SC.building.saves[1].id,true);row.Activated:Fire();prompt=assert(__T.gui:FindFirstChild('BuildLoadPrompt'));TestEnv.click(prompt,'Yes');SC.ownerSync.tick();SC.ownerSync.tick()
  local api=SC.building.api;local loaded=api.document();assert(#loaded.parts==1 and loaded.parts[1].size[1]==15 and loaded.parts[1].material=='Metal')
  for i,n in ipairs(_G.ExpectedBuild.parts[1].cf)do assert(math.abs(n-loaded.parts[1].cf[i])<1e-7,'saved position/orientation changed')end
  SC.setBuilding(false);assert(not api.isEnabled()and not api.ui.materialWindow.Visible and not api.ui.trowelSwitch.Visible)
@@ -101,7 +105,7 @@ try{
  _G.HeadLockMenuCleanup();assert(SC.ownerSync.closed and SC.building.api==nil)
  `);
  reloaded=await client(true);await run(reloaded,`local SC=__T.SC;SC.authenticated=true;SC.ownerSync.tick();SC.setOwnerFeatures(true);SC.building.list();SC.ownerSync.tick();assert(#SC.building.saves==1 and SC.building.saves[1].name=='Road 1','restart lost named save')
- SC.building.selected=SC.building.saves[1];SC.building.load();SC.ownerSync.tick();assert(#SC.building.api.document().parts==1)
+ SC.building.selected=SC.building.saves[1];SC.building.loadPrompt();local prompt=assert(__T.gui:FindFirstChild('BuildLoadPrompt'));TestEnv.click(prompt,'Yes');SC.ownerSync.tick();SC.ownerSync.tick();assert(#SC.building.api.document().parts==1);assert(SC.ownerSync.docs['100'].parts[1].material=='Metal','loading with tools off did not update shared build')
  _G.HeadLockMenuCleanup()`);
  await run(viewer,`_G.HeadLockMenuCleanup()`);
  assert([...values.keys()].some(k=>k.startsWith('headlock:saves:100:')));
