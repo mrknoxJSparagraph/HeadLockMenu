@@ -108,6 +108,6 @@ try{
  SC.building.selected=SC.building.saves[1];SC.building.loadPrompt();local prompt=assert(__T.gui:FindFirstChild('BuildLoadPrompt'));TestEnv.click(prompt,'Yes');SC.ownerSync.tick();SC.ownerSync.tick();assert(#SC.building.api.document().parts==1);assert(SC.ownerSync.docs['100'].parts[1].material=='Metal','loading with tools off did not update shared build')
  _G.HeadLockMenuCleanup()`);
  await run(viewer,`_G.HeadLockMenuCleanup()`);
- assert([...values.keys()].some(k=>k.startsWith('headlock:saves:100:')));
+ assert([...values.keys()].some(k=>k.startsWith('headlock:saves:owners:v2:')));
  console.log('PASS complete main-menu owner gates, inventory ON/OFF, removed shortcut, two-client live build create/edit/delete/load, exact persistent named saves across script restarts, all five owner actions and paused-client resume');
 }finally{owner?.destroy();viewer?.destroy();reloaded?.destroy();friend?.destroy();fresh?.destroy();}
