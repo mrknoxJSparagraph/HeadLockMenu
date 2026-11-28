@@ -94,25 +94,48 @@ export async function control(redis,input,env=process.env,clock=Date.now){
    return {state,result:{revision:previous.revision+1,doc}};
   },21600);
  }
- const saveIndex='headlock:saves:'+entry.self.user+':'+place;
+ const saveIndex='headlock:saves:owners:v2:'+place;
+ const legacyIndex='headlock:saves:'+entry.self.user+':'+place;
+ const legacyId=value=>'legacy_'+hash(legacyIndex+':'+value).slice(0,48);
+ let catalog;
+ if(['save','list','load','delete-save'].includes(input.op)){
+  const legacy=JSON.parse(await redis(['GET',legacyIndex])||'[]');
+  catalog=await update(redis,saveIndex,state=>{
+   state??={saves:[],migrated:{}};
+   if(!state.migrated[entry.self.user]){
+    for(const row of legacy){
+     const migrated=legacyId(row.id);
+     if(!state.saves.some(r=>r.id===migrated))state.saves.push({id:migrated,name:row.name,updatedAt:row.updatedAt,parts:row.parts,storageKey:legacyIndex+':'+row.id});
+    }
+    state.migrated[entry.self.user]=true;
+   }
+   return {state,result:state.saves};
+  },0);
+ }
+ const resolve=value=>catalog?.find(r=>r.id===value)||catalog?.find(r=>r.id===legacyId(value));
+ const summary=row=>({id:row.id,name:row.name,updatedAt:row.updatedAt,parts:row.parts});
  if(input.op==='save'){
   check(id(input.saveId)&&typeof input.name==='string','save');const name=input.name.trim();check(name.length>0&&name.length<=80&&!/[\x00-\x1f]/.test(name),'name');
-  const doc=document(input.doc,place);doc.name=name;const key=saveIndex+':'+input.saveId;
+  const row=resolve(input.saveId);const saveId=row?.id??input.saveId;const key=row?.storageKey??saveIndex+':'+saveId;
+  const doc=document(input.doc,place);doc.name=name;
   const old=await redis(['GET',key]);const prior=old?JSON.parse(old):null;
-  const saved={id:input.saveId,name,updatedAt:now,createdAt:prior?.createdAt??now,parts:doc.parts.length,doc};
+  const saved={id:saveId,name,updatedAt:now,createdAt:prior?.createdAt??now,parts:doc.parts.length,doc};
   await update(redis,key,()=>({state:saved,result:null}),0);
-  await update(redis,saveIndex,rows=>{
-   rows??=[];check(rows.length<100||rows.some(r=>r.id===input.saveId),'save limit');
-   rows=rows.filter(r=>r.id!==input.saveId);rows.push({id:saved.id,name,updatedAt:now,parts:doc.parts.length});return {state:rows,result:null};
+  await update(redis,saveIndex,state=>{
+   state??={saves:[],migrated:{}};check(state.saves.length<100||state.saves.some(r=>r.id===saveId),'save limit');
+   state.saves=state.saves.filter(r=>r.id!==saveId);state.saves.push({...summary(saved),storageKey:key});return {state,result:null};
   },0);
-  base.saved={id:saved.id,name,parts:doc.parts.length,updatedAt:now};
+  base.saved=summary(saved);
  }
- if(input.op==='list')base.saves=JSON.parse(await redis(['GET',saveIndex])||'[]').sort((a,b)=>b.updatedAt-a.updatedAt);
+ if(input.op==='list')base.saves=catalog.map(summary).sort((a,b)=>b.updatedAt-a.updatedAt);
  if(input.op==='load'){
-  check(id(input.saveId),'save');const saved=JSON.parse(await redis(['GET',saveIndex+':'+input.saveId])||'null');check(saved,'save missing');base.doc=document(saved.doc,place);base.saveId=input.saveId;
+  check(id(input.saveId),'save');const row=resolve(input.saveId);check(row,'save missing');
+  const saved=JSON.parse(await redis(['GET',row.storageKey])||'null');check(saved,'save missing');base.doc=document(saved.doc,place);base.saveId=row.id;
  }
  if(input.op==='delete-save'){
-  check(id(input.saveId),'save');await update(redis,saveIndex,rows=>({state:(rows??[]).filter(r=>r.id!==input.saveId),result:null}),0);await redis(['DEL',saveIndex+':'+input.saveId]);
+  check(id(input.saveId),'save');const row=resolve(input.saveId);check(row,'save missing');
+  await update(redis,saveIndex,state=>{state.saves=state.saves.filter(r=>r.id!==row.id);return {state,result:null};},0);
+  await redis(['DEL',row.storageKey]);
  }
  if(['join','poll','publish'].includes(input.op)){
   const live=JSON.parse(await redis(['GET',roomKey])||'{"owners":{}}');base.builds=[];
